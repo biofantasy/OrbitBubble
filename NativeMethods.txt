@@ -1,0 +1,17 @@
+# 熱鍵相關
+RegisterHotKey
+UnregisterHotKey
+HOT_KEY_MODIFIERS
+
+# 視窗定位與置頂
+SetWindowPos
+SET_WINDOW_POS_FLAGS
+GetCursorPos
+Windows.Win32.Foundation.POINT
+
+# 滑鼠 Hook 相關 (旋轉偵測用)
+SetWindowsHookEx
+UnhookWindowsHookEx
+CallNextHookEx
+WINDOWS_HOOK_ID
+MSLLHOOKSTRUCT
