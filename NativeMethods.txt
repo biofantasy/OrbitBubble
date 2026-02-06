@@ -15,3 +15,8 @@ UnhookWindowsHookEx
 CallNextHookEx
 WINDOWS_HOOK_ID
 MSLLHOOKSTRUCT
+
+# 這是 Windows Shell API 的一部分。
+# 它能根據路徑回傳一個 IntPtr (圖標句柄 hIcon)，
+# 再利用 System.Windows.Interop.Imaging.CreateBitmapSourceFromHIcon 將它轉為 WPF 可以顯示的 ImageSource
+SHGetFileInfo
