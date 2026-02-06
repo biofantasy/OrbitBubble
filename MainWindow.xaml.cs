@@ -1,7 +1,6 @@
 ﻿using OrbitBubble.Core.Helpers;
 using OrbitBubble.Core.Managers;
 using OrbitBubble.Core.Models;
-using System.Drawing;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -340,27 +339,36 @@ public partial class MainWindow : Window {
       Canvas.SetTop(CenterHub, mouseOnCanvasY - (CenterHub.ActualHeight / 2));
 
       // 2. 讓動畫從滑鼠點「噴發」出來
+      // 設定旋轉與縮放的中心點一致
       MainScale.CenterX = mouseOnCanvasX;
       MainScale.CenterY = mouseOnCanvasY;
+      MainRotate.CenterX = mouseOnCanvasX;
+      MainRotate.CenterY = mouseOnCanvasY;
     }
   }
 
   private void HideMenuWithAnimation() {
-    // 建立縮小動畫 (從 1.0 縮到 0.0)
-    DoubleAnimation da = new DoubleAnimation {
-      To = 0,
-      Duration = TimeSpan.FromSeconds(0.2),
-      EasingFunction = new QuarticEase { EasingMode = EasingMode.EaseIn }
+    Duration duration = new Duration(TimeSpan.FromSeconds(0.3));
+    IEasingFunction ease = new QuarticEase { EasingMode = EasingMode.EaseIn };
+
+    // 縮放動畫
+    DoubleAnimation scaleAnim = new DoubleAnimation(0, duration) { EasingFunction = ease };
+
+    // 旋轉動畫 (捲回去：0 -> -180)
+    DoubleAnimation rotateAnim = new DoubleAnimation {
+      To = -180,
+      Duration = duration,
+      EasingFunction = ease
     };
 
-    // 當動畫結束時，才真正隱藏視窗並清理泡泡
-    da.Completed += (s, e) => {
+    scaleAnim.Completed += (s, e) => {
       this.Visibility = Visibility.Collapsed;
-      ClearBubbles(); // 移除動態加入的泡泡
+      ClearBubbles();
     };
 
-    MainScale.BeginAnimation(ScaleTransform.ScaleXProperty, da);
-    MainScale.BeginAnimation(ScaleTransform.ScaleYProperty, da);
+    MainScale.BeginAnimation(ScaleTransform.ScaleXProperty, scaleAnim);
+    MainScale.BeginAnimation(ScaleTransform.ScaleYProperty, scaleAnim);
+    MainRotate.BeginAnimation(RotateTransform.AngleProperty, rotateAnim);
   }
 
   private void ClearBubbles() {
@@ -374,23 +382,41 @@ public partial class MainWindow : Window {
   }
 
   private void ShowMenuWithAnimation() {
-
     this.Visibility = Visibility.Visible;
     this.Opacity = 1;
 
-    // 1. 強制重置 Scale 數值，防止被上次的隱藏動畫鎖死
+    // 1. 徹底清除舊動畫鎖，確保 CenterX/Y 的修改能生效
     MainScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
     MainScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+    MainRotate.BeginAnimation(RotateTransform.AngleProperty, null);
 
-    DoubleAnimation da = new DoubleAnimation {
-      From = 0, // 強制從 0 開始
-      To = 1,
-      Duration = TimeSpan.FromSeconds(0.3),
-      EasingFunction = new BackEase { Amplitude = 0.5, EasingMode = EasingMode.EaseOut }
+    // 2. 取得由 UpdatePositionToMouse 設定好的中心點
+    double cx = MainScale.CenterX;
+    double cy = MainScale.CenterY;
+    MainRotate.CenterX = cx;
+    MainRotate.CenterY = cy;
+
+    Duration duration = new Duration(TimeSpan.FromSeconds(0.4));
+    // 使用 BackEase 讓它噴出來時有一點彈性感
+    IEasingFunction ease = new BackEase { Amplitude = 0.5, EasingMode = EasingMode.EaseOut };
+
+    // 3. 縮放動畫 (0 -> 1)
+    DoubleAnimation scaleAnim = new DoubleAnimation(0, 1, duration) { EasingFunction = ease };
+
+    // 4. 旋轉動畫 (半圈：-180 -> 0)
+    DoubleAnimation rotateAnim = new DoubleAnimation {
+      From = -180,
+      To = 0,
+      Duration = duration,
+      EasingFunction = new QuarticEase { EasingMode = EasingMode.EaseOut }
     };
 
-    MainScale.BeginAnimation(ScaleTransform.ScaleXProperty, da);
-    MainScale.BeginAnimation(ScaleTransform.ScaleYProperty, da);
+    // 5. 執行：注意這裡不要重複呼叫 Scale！
+    MainScale.BeginAnimation(ScaleTransform.ScaleXProperty, scaleAnim);
+    MainScale.BeginAnimation(ScaleTransform.ScaleYProperty, scaleAnim);
+    MainRotate.BeginAnimation(RotateTransform.AngleProperty, rotateAnim);
+
+    RefreshLayout();
   }
 
   private void LayoutBubbles(int count) {
@@ -728,5 +754,7 @@ public partial class MainWindow : Window {
       RefreshLayout();
     }
   }
+
+  
 
 }

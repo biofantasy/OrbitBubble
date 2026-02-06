@@ -11,7 +11,10 @@
 	<Grid>
 		<Canvas x:Name="MainCanvas" Background="Transparent">
 			<Canvas.RenderTransform>
-				<ScaleTransform x:Name="MainScale" ScaleX="0" ScaleY="0"/>
+				<TransformGroup>
+					<ScaleTransform x:Name="MainScale" ScaleX="0" ScaleY="0" />
+					<RotateTransform x:Name="MainRotate" Angle="0" />
+				</TransformGroup>
 			</Canvas.RenderTransform>
 
 			<Grid x:Name="CenterHub" 
