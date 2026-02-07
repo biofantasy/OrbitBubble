@@ -10,38 +10,47 @@
 				ShowInTaskbar="False">
 	<Grid>
 		<Canvas x:Name="MainCanvas" Background="Transparent">
-			<Canvas.RenderTransform>
-				<TransformGroup>
-					<ScaleTransform x:Name="MainScale" ScaleX="0" ScaleY="0" />
-					<RotateTransform x:Name="MainRotate" Angle="0" />
-				</TransformGroup>
-			</Canvas.RenderTransform>
 
-			<Grid x:Name="CenterHub" 
-              Width="100" Height="100"
-              Canvas.Left="350" Canvas.Top="350"
-              AllowDrop="True" 
-              DragOver="CenterHub_DragOver" 
-              Drop="CenterHub_Drop"
-              Background="Transparent"
-							MouseLeftButtonDown="CenterHub_MouseLeftButtonDown">
-				<Ellipse x:Name="HubCircle"
-                     Fill="#CC222222"
-                     Stroke="Cyan" StrokeThickness="2">
-					<Ellipse.Effect>
-						<DropShadowEffect Color="Cyan" BlurRadius="20" ShadowDepth="0" Opacity="0.8"/>
-					</Ellipse.Effect>
-				</Ellipse>
+			<Canvas x:Name="AnimationWrapper" 
+                    Width="800" Height="800" 
+                    Background="Transparent" 
+                    RenderTransformOrigin="0.5,0.5">
 
-				<TextBlock x:Name="HubText" 
-                       Text="Root" 
-                       Foreground="White" 
-                       FontSize="16" 
-                       FontWeight="Bold"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Center"
-                       IsHitTestVisible="False"/>
-			</Grid>
+				<Canvas.RenderTransform>
+					<TransformGroup>
+						<ScaleTransform x:Name="MainScale" ScaleX="0" ScaleY="0" />
+						<RotateTransform x:Name="MainRotate" Angle="0" />
+					</TransformGroup>
+				</Canvas.RenderTransform>
+
+				<Grid x:Name="CenterHub" 
+                      Width="100" Height="100"
+                      Canvas.Left="350" Canvas.Top="350"
+                      HorizontalAlignment="Center" 
+                      VerticalAlignment="Center"
+                      AllowDrop="True" 
+                      DragOver="CenterHub_DragOver" 
+                      Drop="CenterHub_Drop"
+                      Background="Transparent"
+                      MouseLeftButtonDown="CenterHub_MouseLeftButtonDown">
+
+					<Ellipse x:Name="HubCircle" Fill="#CC222222" Stroke="Cyan" StrokeThickness="2">
+						<Ellipse.Effect>
+							<DropShadowEffect Color="Cyan" BlurRadius="20" ShadowDepth="0" Opacity="0.8"/>
+						</Ellipse.Effect>
+					</Ellipse>
+
+					<TextBlock x:Name="HubText" 
+                               Text="Root" 
+                               Foreground="White" 
+                               FontSize="16" 
+                               FontWeight="Bold"
+                               HorizontalAlignment="Center" 
+                               VerticalAlignment="Center" 
+                               IsHitTestVisible="False"/>
+				</Grid>
+
+			</Canvas>
 		</Canvas>
 	</Grid>
 </Window>

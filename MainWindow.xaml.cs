@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
 using System.Windows.Shapes;
 
 namespace OrbitBubble;
@@ -24,30 +25,60 @@ public partial class MainWindow : Window {
   private HotkeyManager _hotkeyManager = new();
   private bool _isDragging = false;
   private System.Windows.Point _clickPosition;
+  private List<System.Windows.Point> _gesturePoints = new();
+  private double _accumulatedAngle = 0; // 累計旋轉角度
+  private System.Windows.Point _lastMousePos;
+  private bool _isRightDrawing = false;
+  private GlobalMouseHook _globalHook = new();
+  private int _skipCounter = 0;
 
   public MainWindow() {
 
     InitializeComponent();
+    // 讓整個視窗的動畫渲染優先權提高，解決卡頓
+    this.SetValue(RenderOptions.EdgeModeProperty, EdgeMode.Aliased);
 
-    // 1. 設定視窗覆蓋所有螢幕
+    // 關鍵：使用 VirtualScreen 涵蓋所有螢幕
     this.Left = SystemParameters.VirtualScreenLeft;
     this.Top = SystemParameters.VirtualScreenTop;
     this.Width = SystemParameters.VirtualScreenWidth;
     this.Height = SystemParameters.VirtualScreenHeight;
 
-    // 2. 關鍵：確保畫布也一樣大，否則 AddBubble 計算會出錯
+    // 讓 Canvas 大小跟隨視窗
     MainCanvas.Width = this.Width;
     MainCanvas.Height = this.Height;
+    // 3. 確保背景是透明但「存在」的，這樣才抓得到全域事件
+    MainCanvas.Background = System.Windows.Media.Brushes.Transparent;
 
     (_allBubbles, _currentViewBubbles) = BubbleDataManager.LoadData(); // 程式啟動先載入
     // 監聽中心圓的右鍵
     CenterHub.MouseRightButtonUp += CenterHub_MouseRightButtonUp;
 
     // 初始化時先給 CenterHub 一個畫面中間的位置，避免一開始是 NaN
-    Canvas.SetLeft(CenterHub, this.Width / 2 - 50);
-    Canvas.SetTop(CenterHub, this.Height / 2 - 50);
+    //Canvas.SetLeft(CenterHub, this.Width / 2 - 50);
+    //Canvas.SetTop(CenterHub, this.Height / 2 - 50);
 
     RefreshLayout();
+
+    _globalHook.MouseMoved += (x, y) => {
+      //_skipCounter++;
+      //if (_skipCounter % 4 != 0) return; // 每 4 次移動才處理 1 次，直接省下 75% 的運算量
+      // 使用 Dispatcher 回到 UI 執行緒執行手勢判斷與 UI 更新
+      this.Dispatcher.Invoke(() => {
+        // 不管視窗是 Visible 還是 Collapsed，都由 GlobalHook 驅動偵測
+        // 這樣就不會因為滑鼠「離清單太遠」而收不到事件
+        DetectCircleGesture(new System.Windows.Point(x, y));
+      });
+    };
+
+    _globalHook.Install();
+  }
+
+  // 記得在程式關閉時卸載，否則系統會變慢
+  protected override void OnClosed(EventArgs e) {
+    _globalHook.Uninstall();
+    _hotkeyManager.Unregister();
+    base.OnClosed(e);
   }
 
   private void CenterHub_MouseRightButtonUp(object sender, MouseButtonEventArgs e) {
@@ -136,7 +167,25 @@ public partial class MainWindow : Window {
 
       // 重要：每次移動後更新基準點，否則會噴射
       _clickPosition = currentPos;
+      HandleDragging(e.GetPosition(this));
+      return;
     }
+
+    // --- 新增：手勢偵測邏輯 (當視窗內容隱藏時) ---
+    // 選單開啟時，利用原本的 MouseMove 偵測「逆時針關閉」
+    // --- 修正：當選單開啟時的手勢偵測 ---
+    //if (this.Visibility == Visibility.Visible) {
+    //  System.Drawing.Point p;
+    //  if (Windows.Win32.PInvoke.GetCursorPos(out p)) {
+    //    var source = PresentationSource.FromVisual(this);
+    //    if (source?.CompositionTarget != null) {
+    //      var m = source.CompositionTarget.TransformFromDevice;
+    //      // 轉換成 DIP 座標，這樣才跟 GlobalHook 傳入的尺度一致
+    //      var dipPos = m.Transform(new System.Windows.Point(p.X, p.Y));
+    //      DetectCircleGesture(dipPos);
+    //    }
+    //  }
+    //}
   }
 
   // 2. 放開時：嚴格判定位移
@@ -172,64 +221,39 @@ public partial class MainWindow : Window {
     int index = _currentViewBubbles.IndexOf(data);
     int total = _currentViewBubbles.Count;
 
-    double hubX = Canvas.GetLeft(CenterHub);
-    double hubY = Canvas.GetTop(CenterHub);
-    double centerX = hubX + (CenterHub.ActualWidth / 2);
-    double centerY = hubY + (CenterHub.ActualHeight / 2);
-
+    // 回彈目標是相對於舞台中心的 (400, 400)
+    double centerX = 400;
+    double centerY = 400;
     double radius = 180;
     double angle = index * Math.PI * 2 / total;
+
     double targetX = centerX + radius * Math.Cos(angle) - (element.ActualWidth / 2);
     double targetY = centerY + radius * Math.Sin(angle) - (element.ActualHeight / 2);
 
-    double currentX = Canvas.GetLeft(element);
-    double currentY = Canvas.GetTop(element);
-
-    // 建立動畫
-    var animX = new DoubleAnimation(currentX, targetX, TimeSpan.FromSeconds(0.4)) {
+    DoubleAnimation animX = new DoubleAnimation(Canvas.GetLeft(element), targetX, TimeSpan.FromSeconds(0.4)) {
       EasingFunction = new BackEase { Amplitude = 0.3, EasingMode = EasingMode.EaseOut }
     };
-    var animY = new DoubleAnimation(currentY, targetY, TimeSpan.FromSeconds(0.4)) {
+    DoubleAnimation animY = new DoubleAnimation(Canvas.GetTop(element), targetY, TimeSpan.FromSeconds(0.4)) {
       EasingFunction = new BackEase { Amplitude = 0.3, EasingMode = EasingMode.EaseOut }
     };
 
-    // 關鍵：當動畫結束時，將座標「固化」
-    animX.Completed += (s, e) => {
-      element.BeginAnimation(Canvas.LeftProperty, null); // 移除動畫鎖
-      Canvas.SetLeft(element, targetX); // 正式寫入本地值
-    };
-    animY.Completed += (s, e) => {
-      element.BeginAnimation(Canvas.TopProperty, null); // 移除動畫鎖
-      Canvas.SetTop(element, targetY); // 正式寫入本地值
-    };
+    animX.Completed += (s, e) => { element.BeginAnimation(Canvas.LeftProperty, null); Canvas.SetLeft(element, targetX); };
+    animY.Completed += (s, e) => { element.BeginAnimation(Canvas.TopProperty, null); Canvas.SetTop(element, targetY); };
 
     element.BeginAnimation(Canvas.LeftProperty, animX);
     element.BeginAnimation(Canvas.TopProperty, animY);
   }
 
   private void SetBubblesOpacity(double opacity) {
-    // 使用 ToList() 建立快照，避免遍歷時因集合變動而崩潰
-    var bubbles = MainCanvas.Children.OfType<UIElement>()
-                                    .Where(x => x != CenterHub)
-                                    .ToList();
-
+    // 改成抓 AnimationWrapper 的子元素
+    var bubbles = AnimationWrapper.Children.OfType<UIElement>()
+                                           .Where(x => x != CenterHub)
+                                           .ToList();
     foreach (var el in bubbles) {
-      DoubleAnimation da = new DoubleAnimation {
-        To = opacity,
-        Duration = TimeSpan.FromSeconds(0.2),
-        EasingFunction = new QuarticEase { EasingMode = EasingMode.EaseOut }
-      };
-      el.BeginAnimation(UIElement.OpacityProperty, da);
+      el.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(opacity, TimeSpan.FromSeconds(0.2)));
     }
   }
 
-  private void SetBubblesVisibility(Visibility visibility) {
-    foreach (var child in MainCanvas.Children) {
-      if (child is FrameworkElement el && el != CenterHub) {
-        el.Visibility = visibility;
-      }
-    }
-  }
 
   private void ExecuteBubbleAction(FrameworkElement element) {
     var data = element.Tag as BubbleItem;
@@ -319,31 +343,32 @@ public partial class MainWindow : Window {
     }
   }
 
+  [System.Runtime.InteropServices.DllImport("user32.dll")]
+  static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+  private const uint SWP_NOSIZE = 0x0001;
+  private const uint SWP_NOZORDER = 0x0004;
+  private const uint SWP_SHOWWINDOW = 0x0040;
+
   private void UpdatePositionToMouse() {
     System.Drawing.Point p;
-    Windows.Win32.PInvoke.GetCursorPos(out p);
+    if (Windows.Win32.PInvoke.GetCursorPos(out p)) {
+      var source = PresentationSource.FromVisual(this);
+      if (source?.CompositionTarget != null) {
+        var m = source.CompositionTarget.TransformFromDevice;
+        var dipMousePos = m.Transform(new System.Windows.Point(p.X, p.Y));
 
-    var source = PresentationSource.FromVisual(this);
-    if (source?.CompositionTarget != null) {
-      var m = source.CompositionTarget.TransformFromDevice;
-      var dip = m.Transform(new System.Windows.Point(p.X, p.Y));
+        // 計算相對於 VirtualScreen 的絕對位置
+        double mouseOnCanvasX = dipMousePos.X - SystemParameters.VirtualScreenLeft;
+        double mouseOnCanvasY = dipMousePos.Y - SystemParameters.VirtualScreenTop;
 
-      // 核心修正：計算相對於整個虛擬畫布的座標
-      // 因為 this.Left 可能是負值（副螢幕在左邊），dip.X 也是絕對座標
-      // 我們直接求出兩者的差值，這就是滑鼠在畫布上的正確位置
-      double mouseOnCanvasX = dip.X - this.Left;
-      double mouseOnCanvasY = dip.Y - this.Top;
+        // 重點：移動 AnimationWrapper，讓它的中心點 (400, 400) 對準滑鼠
+        Canvas.SetLeft(AnimationWrapper, mouseOnCanvasX - 400);
+        Canvas.SetTop(AnimationWrapper, mouseOnCanvasY - 400);
 
-      // 1. 強制重置 CenterHub 的位置，不繼承上次的任何狀態
-      Canvas.SetLeft(CenterHub, mouseOnCanvasX - (CenterHub.ActualWidth / 2));
-      Canvas.SetTop(CenterHub, mouseOnCanvasY - (CenterHub.ActualHeight / 2));
-
-      // 2. 讓動畫從滑鼠點「噴發」出來
-      // 設定旋轉與縮放的中心點一致
-      MainScale.CenterX = mouseOnCanvasX;
-      MainScale.CenterY = mouseOnCanvasY;
-      MainRotate.CenterX = mouseOnCanvasX;
-      MainRotate.CenterY = mouseOnCanvasY;
+        // 強制 UI 刷新位置，避免動畫抓到舊座標
+        this.UpdateLayout();
+      }
     }
   }
 
@@ -362,8 +387,17 @@ public partial class MainWindow : Window {
     };
 
     scaleAnim.Completed += (s, e) => {
-      this.Visibility = Visibility.Collapsed;
+      // 不要設為 Collapsed，否則滑鼠手勢會失效
+      this.Visibility = Visibility.Collapsed; // 先徹底隱藏
+      MainCanvas.Opacity = 0; // 隱藏後立刻歸零，為下次開啟做準備
+
+      // 【重要】解除動畫對屬性的鎖定，否則下次 UpdatePositionToMouse 修改位置會無效
+      MainScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+      MainScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+      MainRotate.BeginAnimation(RotateTransform.AngleProperty, null);
+
       ClearBubbles();
+      ResetGesture(); // 清空手勢殘留
     };
 
     MainScale.BeginAnimation(ScaleTransform.ScaleXProperty, scaleAnim);
@@ -372,94 +406,88 @@ public partial class MainWindow : Window {
   }
 
   private void ClearBubbles() {
-    // 修正：現在要找的是 Grid (CreateBubbleVisual 回傳的容器)
-    var toRemove = MainCanvas.Children.OfType<FrameworkElement>()
-                                     .Where(x => x != CenterHub)
-                                     .ToList();
-    foreach (var item in toRemove) {
-      MainCanvas.Children.Remove(item);
-    }
+    // 改為清理 AnimationWrapper，但避開 CenterHub
+    var toRemove = AnimationWrapper.Children.OfType<FrameworkElement>()
+                                         .Where(x => x != CenterHub)
+                                         .ToList();
+    foreach (var item in toRemove) AnimationWrapper.Children.Remove(item);
   }
 
-  private void ShowMenuWithAnimation() {
+  private async void ShowMenuWithAnimation() {
+    // 1. 初始化狀態：確保舞台與畫布先隱藏
     this.Visibility = Visibility.Visible;
-    this.Opacity = 1;
+    MainCanvas.Opacity = 0;
 
-    // 1. 徹底清除舊動畫鎖，確保 CenterX/Y 的修改能生效
+    // 重置動畫狀態（解除屬性鎖定）
     MainScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
     MainScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
     MainRotate.BeginAnimation(RotateTransform.AngleProperty, null);
 
-    // 2. 取得由 UpdatePositionToMouse 設定好的中心點
-    double cx = MainScale.CenterX;
-    double cy = MainScale.CenterY;
-    MainRotate.CenterX = cx;
-    MainRotate.CenterY = cy;
+    MainScale.ScaleX = 0;
+    MainScale.ScaleY = 0;
+    MainRotate.Angle = -180; // 初始旋轉角度
 
+    // 2. 核心定位：讓舞台中心對準滑鼠
+    // 這裡調用 UpdatePositionToMouse，它會執行 Canvas.SetLeft(AnimationWrapper, mouseX - 400)
+    UpdatePositionToMouse();
+
+    // 3. 確保佈局已計算（重要：否則 GetPosition 可能會拿到舊資料）
+    this.UpdateLayout();
+    await this.NextFrame(); // 等待下一影格確保渲染引擎抓到新位置
+
+    // 4. 重置手勢快照，避免舊的滑鼠軌跡干擾
+    ResetGesture();
+    _lastMousePos = new System.Windows.Point(-1, -1);
+
+    // 5. 設定動畫參數
     Duration duration = new Duration(TimeSpan.FromSeconds(0.4));
-    // 使用 BackEase 讓它噴出來時有一點彈性感
-    IEasingFunction ease = new BackEase { Amplitude = 0.5, EasingMode = EasingMode.EaseOut };
 
-    // 3. 縮放動畫 (0 -> 1)
-    DoubleAnimation scaleAnim = new DoubleAnimation(0, 1, duration) { EasingFunction = ease };
-
-    // 4. 旋轉動畫 (半圈：-180 -> 0)
-    DoubleAnimation rotateAnim = new DoubleAnimation {
-      From = -180,
-      To = 0,
-      Duration = duration,
-      EasingFunction = new QuarticEase { EasingMode = EasingMode.EaseOut }
+    // 彈出效果：使用 BackEase 讓它有一點點回彈感
+    IEasingFunction backEase = new BackEase {
+      Amplitude = 0.5,
+      EasingMode = EasingMode.EaseOut
     };
 
-    // 5. 執行：注意這裡不要重複呼叫 Scale！
-    MainScale.BeginAnimation(ScaleTransform.ScaleXProperty, scaleAnim);
-    MainScale.BeginAnimation(ScaleTransform.ScaleYProperty, scaleAnim);
+    // 旋轉效果：使用 QuarticEase 讓轉動由快變慢
+    IEasingFunction quartEase = new QuarticEase {
+      EasingMode = EasingMode.EaseOut
+    };
+
+    // 6. 建立動畫物件
+    var expandAnim = new DoubleAnimation(0, 1, duration) { EasingFunction = backEase };
+    var opacityAnim = new DoubleAnimation(0, 1, duration);
+    var rotateAnim = new DoubleAnimation(-180, 0, duration) { EasingFunction = quartEase };
+
+    // 強制 60 FPS (如果電腦效能足夠)
+    Timeline.SetDesiredFrameRate(expandAnim, 60);
+
+    // 7. 同步執行重新佈局 (生成泡泡)
+    RefreshLayout();
+
+    // 8. 啟動動畫
+    MainCanvas.BeginAnimation(Canvas.OpacityProperty, opacityAnim);
+    MainScale.BeginAnimation(ScaleTransform.ScaleXProperty, expandAnim);
+    MainScale.BeginAnimation(ScaleTransform.ScaleYProperty, expandAnim);
     MainRotate.BeginAnimation(RotateTransform.AngleProperty, rotateAnim);
 
-    RefreshLayout();
+    // 確保視窗獲取焦點
+    this.Activate();
   }
 
-  private void LayoutBubbles(int count) {
-    //double radius = 150; // 泡泡距離中心的距離
-    //double centerX = this.Width / 2;
-    //double centerY = this.Height / 2;
-
-    //for (int i = 0; i < count; i++) {
-    //  double angle = i * Math.PI * 2 / count; // 弧度計算
-    //  double x = centerX + radius * Math.Cos(angle) - 25; // 25 為泡泡半徑偏移
-    //  double y = centerY + radius * Math.Sin(angle) - 25;
-
-    //  // 建立泡泡元件 (這裡暫時用圓圈代替)
-    //  Ellipse bubble = new Ellipse {
-    //    Width = 50, Height = 50,
-    //    Fill = Brushes.DeepSkyBlue,
-    //    Opacity = 0.8
-    //  };
-
-    //  Canvas.SetLeft(bubble, x);
-    //  Canvas.SetTop(bubble, y);
-
-    //  // 將泡泡加入你的 Canvas (假設名稱為 MainCanvas)
-    //  MainCanvas.Children.Add(bubble);
-
-    //  // TODO: 加入彈入動畫 (RenderTransform + DoubleAnimation)
-    //}
-  }
 
   private bool CheckForMerger(UIElement draggedBubble) {
-    var allItems = MainCanvas.Children.OfType<FrameworkElement>().ToList();
+    // 改從 AnimationWrapper 找，而不是 MainCanvas
+    var allItems = AnimationWrapper.Children.OfType<FrameworkElement>().ToList();
 
     foreach (var other in allItems) {
       if (other == draggedBubble || other == CenterHub) continue;
 
-      // 檢查距離是否小於 50 像素
       if (other.Tag is BubbleItem && GetDistance(draggedBubble, other) < 50) {
         MergeBubbles(other, draggedBubble);
-        BubbleDataManager.SaveData(_allBubbles); // 合併成功即存檔
-        return true; // 告知合併成功
+        return true;
       }
     }
-    return false; // 沒有發生合併
+    return false;
   }
 
   private double GetDistance(UIElement e1, UIElement e2) {
@@ -527,6 +555,7 @@ public partial class MainWindow : Window {
 
     ClearBubbles(); // 清空畫面
 
+    // 這裡改用非同步載入，避免一次擠爆 UI 執行緒
     for (int i = 0; i < _currentViewBubbles.Count; i++) {
       AddBubble(_currentViewBubbles[i], i, _currentViewBubbles.Count);
     }
@@ -591,26 +620,23 @@ public partial class MainWindow : Window {
 
   private void AddBubble(BubbleItem data, int index, int totalCount) {
     var bubble = CreateBubbleVisual(data);
+    AnimationWrapper.Children.Add(bubble);
 
-    // 必須即時獲取 CenterHub 的 Canvas 座標
-    double hubX = Canvas.GetLeft(CenterHub);
-    double hubY = Canvas.GetTop(CenterHub);
-
-    double centerX = hubX + 50;
-    double centerY = hubY + 50;
-
+    // 舞台中心點固定為 400, 400
+    double centerX = 400;
+    double centerY = 400;
     double radius = 180;
     double angle = index * Math.PI * 2 / totalCount;
 
-    // 計算泡泡位置
-    double x = centerX + radius * Math.Cos(angle) - 37.5;
-    double y = centerY + radius * Math.Sin(angle) - 37.5;
+    // 計算相對於 800x800 舞台的座標
+    double x = centerX + radius * Math.Cos(angle) - (75 / 2);
+    double y = centerY + radius * Math.Sin(angle) - (75 / 2);
 
     Canvas.SetLeft(bubble, x);
     Canvas.SetTop(bubble, y);
-    MainCanvas.Children.Add(bubble);
 
-    // 噴射動畫
+    // 噴射動畫：從中心(1,1)噴射到正確位置的 Scale(1,1)
+    // 注意：這裡我們讓 RenderTransformOrigin 為 0.5,0.5，所以動畫看起來是原地變大
     DoubleAnimation expand = new DoubleAnimation {
       To = 1.0,
       Duration = TimeSpan.FromSeconds(0.3),
@@ -629,6 +655,7 @@ public partial class MainWindow : Window {
       Background = System.Windows.Media.Brushes.Transparent, // <--- 必須加這個，拖曳才靈敏
       RenderTransformOrigin = new System.Windows.Point(0.5, 0.5),
       RenderTransform = new ScaleTransform(0, 0),
+      //CacheMode = new BitmapCache(), // 【核心】交給 GPU 快取，大幅提升旋轉與移動效能
       Tag = data
     };
 
@@ -638,7 +665,11 @@ public partial class MainWindow : Window {
       Stroke = System.Windows.Media.Brushes.Cyan,
       StrokeThickness = 1.5,
       Effect = new System.Windows.Media.Effects.DropShadowEffect {
-        Color = Colors.Cyan, BlurRadius = 10, ShadowDepth = 0, Opacity = 0.5
+        Color = Colors.Cyan,
+        BlurRadius = 8,
+        ShadowDepth = 0,
+        Opacity = 0.5,
+        //RenderingBias = RenderingBias.Performance // 效能模式
       }
     };
 
@@ -755,6 +786,129 @@ public partial class MainWindow : Window {
     }
   }
 
-  
+  private System.Windows.Point? _gestureCenter = null;
 
+  private void DetectCircleGesture(System.Windows.Point currentPos) {
+    _gesturePoints.Add(currentPos);
+
+    // 1. 初始化參考點：如果還沒固定圓心，且點夠多了，就抓平均值固定下來
+    if (_gesturePoints.Count == 10) {
+      _gestureCenter = new System.Windows.Point(
+          _gesturePoints.Average(p => p.X),
+          _gesturePoints.Average(p => p.Y)
+      );
+      _lastMousePos = currentPos;
+      return;
+    }
+
+    if (_gesturePoints.Count < 10 || _gestureCenter == null) {
+      _lastMousePos = currentPos;
+      return;
+    }
+
+    // 2. 向量計算 (使用固定的圓心)
+    var center = _gestureCenter.Value;
+    var vLast = _lastMousePos - center;
+    var vCurrent = currentPos - center;
+
+    // 在向量計算後加入
+    double distance = vCurrent.Length;
+    //if (distance < 40 || distance > 300) {
+    //  // 太小（原地抖動）或太大（跨螢幕瞬移）都不算轉圈
+    //  _lastMousePos = currentPos;
+    //  return;
+    //}
+
+    if (distance < 30 ) {
+      // 太小（原地抖動）或太大（跨螢幕瞬移）都不算轉圈
+      _lastMousePos = currentPos;
+      return;
+    }
+
+    double angleLast = Math.Atan2(vLast.Y, vLast.X);
+    double angleCurrent = Math.Atan2(vCurrent.Y, vCurrent.X);
+    double deltaAngle = (angleCurrent - angleLast) * (180 / Math.PI);
+
+    // 處理跳變
+    if (deltaAngle > 180) deltaAngle -= 360;
+    if (deltaAngle < -180) deltaAngle += 360;
+
+    // 4. 只有當 deltaAngle 超過一定門檻才累加（過濾掉微小的直線抖動）
+    if (Math.Abs(deltaAngle) > 0.5) {
+      _accumulatedAngle += deltaAngle;
+    }
+
+    System.Diagnostics.Debug.WriteLine($"Angle: {_accumulatedAngle:F1} | Pts: {_gesturePoints.Count}");
+
+    // 5. 判定觸發 (門檻降到 130 度，半圈多一點就觸發)
+    if (Math.Abs(_accumulatedAngle) > 130) {
+      bool isClockwise = _accumulatedAngle > 0;
+
+      if (isClockwise && this.Visibility != Visibility.Visible) {
+        this.Dispatcher.Invoke(() => OnHotkeyTriggered());
+        ResetGesture();
+      } else if (!isClockwise && this.Visibility == Visibility.Visible) {
+        this.Dispatcher.Invoke(() => HideMenuWithAnimation());
+        ResetGesture();
+      }
+    }
+
+    // 6. 自動重置機制：如果點太多了還沒觸發，代表不是在轉圈，清空重來
+    if (_gesturePoints.Count > 50) {
+      ResetGesture();
+    }
+
+    _lastMousePos = currentPos;
+  }
+
+  private void ResetGesture() {
+    _gesturePoints.Clear();
+    _accumulatedAngle = 0;
+    _gestureCenter = null;
+    //_sumX = 0; _sumY = 0;
+  }
+
+  private void HandleDragging(System.Windows.Point currentPos) {
+    double deltaX = currentPos.X - _clickPosition.X;
+    double deltaY = currentPos.Y - _clickPosition.Y;
+
+    double left = Canvas.GetLeft(_draggedElement);
+    double top = Canvas.GetTop(_draggedElement);
+
+    if (double.IsNaN(left)) left = 0;
+    if (double.IsNaN(top)) top = 0;
+
+    Canvas.SetLeft(_draggedElement, left + deltaX);
+    Canvas.SetTop(_draggedElement, top + deltaY);
+
+    _clickPosition = currentPos;
+  }
+
+  // 1. 在 Window 標籤增加 MouseRightButtonDown="Window_MouseRightButtonDown"
+  private void Window_MouseRightButtonDown(object sender, MouseButtonEventArgs e) {
+    _isRightDrawing = true;
+    _gesturePoints.Clear();
+    _accumulatedAngle = 0;
+    _lastMousePos = e.GetPosition(this);
+  }
+
+  // 3. 在 MouseRightButtonUp 結束
+  private void Window_MouseRightButtonUp(object sender, MouseButtonEventArgs e) {
+    _isRightDrawing = false;
+    ResetGesture();
+  }
+}
+
+// 輔助擴展，放類別外面或裡面都行
+public static class ExtensionMethods {
+  public static System.Threading.Tasks.Task NextFrame(this System.Windows.UIElement element) {
+    var tcs = new System.Threading.Tasks.TaskCompletionSource<object?>();
+    EventHandler handler = null!;
+    handler = (s, e) => {
+      System.Windows.Media.CompositionTarget.Rendering -= handler; // 務必卸載，否則會卡頓
+      tcs.TrySetResult(null);
+    };
+    System.Windows.Media.CompositionTarget.Rendering += handler;
+    return tcs.Task;
+  }
 }
