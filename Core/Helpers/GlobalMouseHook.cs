@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Runtime.InteropServices;
-using System.Text;
+﻿using System.Runtime.InteropServices;
 
 namespace OrbitBubble.Core.Helpers;
 
@@ -30,11 +27,15 @@ public class GlobalMouseHook {
     if (_hookId == IntPtr.Zero) {
       int errorCode = Marshal.GetLastWin32Error();
       // 如果失敗，可以在這裡記錄錯誤碼碼
+      throw new InvalidOperationException($"SetWindowsHookEx failed. error={errorCode}");
     }
   }
 
   public void Uninstall() {
-    UnhookWindowsHookEx(_hookId);
+    if (_hookId != IntPtr.Zero) {
+      UnhookWindowsHookEx(_hookId);
+      _hookId = IntPtr.Zero;
+    }
   }
 
   // 這個方法放在類別內
@@ -45,13 +46,13 @@ public class GlobalMouseHook {
       // 非同步發出事件，不阻塞滑鼠移動
       int x = hookStruct.pt.x;
       int y = hookStruct.pt.y;
-      Task.Run(() => MouseMoved?.Invoke(x, y));
+      MouseMoved?.Invoke(x, y);
     }
     return CallNextHookEx(_hookId, nCode, wParam, lParam);
   }
 
-  [DllImport("user32.dll")] private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
-  [DllImport("user32.dll")] private static extern bool UnhookWindowsHookEx(IntPtr hhk);
-  [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-  [DllImport("kernel32.dll")] private static extern IntPtr GetModuleHandle(string lpModuleName);
+  [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
+  [DllImport("user32.dll", SetLastError = true)] private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+  [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+  [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr GetModuleHandle(string lpModuleName);
 }
