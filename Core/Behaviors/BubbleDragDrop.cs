@@ -1,7 +1,7 @@
 ﻿using System.Windows;
 using System.Windows.Input;
 using Microsoft.Extensions.DependencyInjection;
-using OrbitBubble.Core.ViewModels;
+using OrbitBubble.ViewModels;
 using OrbitBubble.Domain;
 using OrbitBubble.Domain.Bubbles;
 

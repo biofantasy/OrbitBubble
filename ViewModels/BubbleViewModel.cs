@@ -2,7 +2,7 @@
 using OrbitBubble.Domain.Bubbles;
 using System.Windows.Media;
 
-namespace OrbitBubble.Core.ViewModels;
+namespace OrbitBubble.ViewModels;
 
 public partial class BubbleViewModel : ObservableObject {
   public BubbleViewModel(string id, string displayName, BubbleItemType type, string? path) {

@@ -12,7 +12,7 @@ using OrbitBubble.Infrastructure.Gestures;
 using OrbitBubble.Core.Icons;
 using OrbitBubble.Core.Stores;
 using OrbitBubble.Domain.Bubbles;
-using OrbitBubble.Core.ViewModels;
+using OrbitBubble.ViewModels;
 using OrbitBubble.Domain.Launch;
 using OrbitBubble.Domain;
 
@@ -100,7 +100,11 @@ namespace OrbitBubble {
 
       // 4) 顯示主視窗（改成 DI new）
       var mainWindow = _host.Services.GetRequiredService<MainWindow>();
+      //mainWindow.Show();
+      mainWindow.Opacity = 0;
       mainWindow.Show();
+      mainWindow.Hide();
+      mainWindow.Opacity = 1;
     }
 
     protected override void OnExit(ExitEventArgs e) {

@@ -1,21 +1,59 @@
 ﻿<Window x:Class="OrbitBubble.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:vm="clr-namespace:OrbitBubble.Core.ViewModels"
-        xmlns:behaviors="clr-namespace:OrbitBubble.Core.Behaviors"
         Title="OrbitBubble"
-        Width="900" Height="700"
         WindowStyle="None"
         AllowsTransparency="True"
-        Background="#111">
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
 
-	<Grid>
+        Width="{Binding OverlaySize}"
+        Height="{Binding OverlaySize}">
 
-		<!-- 泡泡 -->
+	<!-- Root overlay canvas: 外部拖曳（Explorer→App）接在這裡，空畫面也可 drop -->
+	<Canvas x:Name="Root"
+            Width="{Binding OverlaySize}"
+            Height="{Binding OverlaySize}"
+            AllowDrop="True"
+            DragOver="Root_DragOver"
+            Drop="Root_Drop">
+
+		<!-- Ring -->
+		<Ellipse Width="{Binding RingDiameter}"
+                 Height="{Binding RingDiameter}"
+                 Canvas.Left="{Binding RingLeft}"
+                 Canvas.Top="{Binding RingTop}"
+                 Stroke="#40FFFFFF"
+                 StrokeThickness="2" />
+
+		<!-- Hub (中心圈): 左鍵 Back、右鍵 Settings -->
+		<Border Width="{Binding HubSize}"
+                Height="{Binding HubSize}"
+                Canvas.Left="{Binding HubLeft}"
+                Canvas.Top="{Binding HubTop}"
+                CornerRadius="{Binding HubCorner}"
+                Background="#AA111111"
+                BorderBrush="#66FFFFFF"
+                BorderThickness="1"
+                MouseLeftButtonUp="Hub_LeftClick"
+                MouseRightButtonUp="Hub_RightClick">
+			<Grid>
+				<TextBlock Text="●"
+                           Foreground="White"
+                           FontSize="18"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"/>
+			</Grid>
+		</Border>
+
+		<!-- Bubbles layer -->
 		<ItemsControl ItemsSource="{Binding VisibleBubbles}">
 			<ItemsControl.ItemsPanel>
 				<ItemsPanelTemplate>
-					<Canvas />
+					<Canvas/>
 				</ItemsPanelTemplate>
 			</ItemsControl.ItemsPanel>
 
@@ -27,32 +65,52 @@
 			</ItemsControl.ItemContainerStyle>
 
 			<ItemsControl.ItemTemplate>
-				<DataTemplate DataType="{x:Type vm:BubbleViewModel}">
-					<Border behaviors:BubbleDragDrop.Enable="True"
-                            MouseLeftButtonUp="Bubble_Click"
-                            Width="80" Height="80" CornerRadius="40"
-                            Background="#222" BorderBrush="#444" BorderThickness="1">
-						<Grid>
-							<Image Source="{Binding Icon}" Width="32" Height="32"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-							<TextBlock Text="{Binding DisplayName}"
-                                       Margin="6,44,6,6"
-                                       Foreground="White"
-                                       FontSize="10"
-                                       TextAlignment="Center"
-                                       TextTrimming="CharacterEllipsis"/>
-						</Grid>
-					</Border>
+				<DataTemplate>
+					<!-- 用 Button 才有 MouseDoubleClick，比 Border 穩 -->
+					<Button Background="Transparent"
+                            BorderThickness="0"
+                            Padding="0"
+                            Focusable="False"
+
+                            MouseDoubleClick="Bubble_DoubleClick"
+                            PreviewMouseLeftButtonDown="Bubble_PreviewMouseLeftButtonDown"
+                            PreviewMouseMove="Bubble_PreviewMouseMove"
+
+                            AllowDrop="True"
+                            DragOver="Bubble_DragOver"
+                            Drop="Bubble_Drop">
+
+						<!-- 泡泡外觀 -->
+						<Border Width="{Binding DataContext.BubbleSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                Height="{Binding DataContext.BubbleSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                                CornerRadius="{Binding DataContext.BubbleCorner, RelativeSource={RelativeSource AncestorType=Window}}"
+                                Background="#CC222222"
+                                BorderBrush="#55FFFFFF"
+                                BorderThickness="1">
+							<Grid>
+								<Image Source="{Binding Icon}"
+                                       Width="28" Height="28"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"/>
+
+								<TextBlock Text="{Binding DisplayName}"
+                                           Margin="6,40,6,6"
+                                           Foreground="White"
+                                           FontSize="10"
+                                           TextAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"/>
+							</Grid>
+						</Border>
+					</Button>
 				</DataTemplate>
 			</ItemsControl.ItemTemplate>
 		</ItemsControl>
 
-		<!-- Debug：確認綁定是不是有資料（想移除就刪掉這塊） -->
+		<!-- Debug：顯示泡泡數量（你確定跑穩再刪） -->
 		<TextBlock Text="{Binding VisibleBubbles.Count}"
                    Foreground="Lime"
                    FontSize="14"
-                   HorizontalAlignment="Left"
-                   VerticalAlignment="Top"
-                   Margin="10"/>
-	</Grid>
+                   Canvas.Left="10"
+                   Canvas.Top="10"/>
+	</Canvas>
 </Window>
