@@ -6,7 +6,7 @@ using System.Windows.Media.Animation;
 namespace OrbitBubble.Core.Services;
 
 public class MenuAnimationService {
-  private const double ClosedRotationAngle = -120;
+  private const double ClosedRotationAngle = -35;
   private const double OpenRotationAngle = 0;
 
   public void PlayHide(Canvas mainCanvas, ScaleTransform mainScale, RotateTransform mainRotate, Action onCompleted) {
@@ -57,13 +57,13 @@ public class MenuAnimationService {
 
   public void PlayShow(Canvas mainCanvas, ScaleTransform mainScale, RotateTransform mainRotate) {
     Duration duration = new Duration(TimeSpan.FromSeconds(0.4));
-    IEasingFunction backEase = new BackEase { Amplitude = 0.5, EasingMode = EasingMode.EaseOut };
+    IEasingFunction backEase = new BackEase { Amplitude = 0.32, EasingMode = EasingMode.EaseOut };
     IEasingFunction quartEase = new QuarticEase { EasingMode = EasingMode.EaseOut };
 
     var expandAnim = new DoubleAnimation(0, 1, duration) { EasingFunction = backEase };
     var opacityAnim = new DoubleAnimation(0, 1, duration);
     var rotateAnim = new DoubleAnimation(ClosedRotationAngle, OpenRotationAngle, duration) { EasingFunction = quartEase };
-    Timeline.SetDesiredFrameRate(expandAnim, 60);
+    Timeline.SetDesiredFrameRate(expandAnim, 45);
 
     mainCanvas.BeginAnimation(Canvas.OpacityProperty, opacityAnim);
     mainScale.BeginAnimation(ScaleTransform.ScaleXProperty, expandAnim);

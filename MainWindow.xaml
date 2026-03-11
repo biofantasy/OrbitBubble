@@ -38,11 +38,33 @@
                       Background="Transparent"
                       MouseLeftButtonDown="CenterHub_MouseLeftButtonDown">
 
-					<Ellipse x:Name="HubCircle" Fill="#CC222222" Stroke="Cyan" StrokeThickness="2">
-						<Ellipse.Effect>
-							<DropShadowEffect Color="Cyan" BlurRadius="12" ShadowDepth="0" Opacity="0.65"/>
-						</Ellipse.Effect>
-					</Ellipse>
+          <Ellipse x:Name="HubBody" Margin="4" IsHitTestVisible="False" Opacity="0.85">
+            <Ellipse.Effect>
+              <DropShadowEffect x:Name="HubGlowEffect" Color="Cyan" BlurRadius="12" ShadowDepth="0" Opacity="0.65"/>
+            </Ellipse.Effect>
+            <Ellipse.Fill>
+              <RadialGradientBrush Center="0.35,0.3"
+                                   GradientOrigin="0.25,0.2"
+                                   RadiusX="0.9"
+                                   RadiusY="0.9">
+                <GradientStop Color="#D0FFFFFF" Offset="0"/>
+                <GradientStop x:Name="HubBodyMiddleStop" Color="#AA43B7FF" Offset="0.45"/>
+                <GradientStop x:Name="HubBodyEdgeStop" Color="#7A143D73" Offset="1"/>
+              </RadialGradientBrush>
+            </Ellipse.Fill>
+          </Ellipse>
+
+          <Ellipse x:Name="HubHighlight" Width="66"
+                   Height="24"
+                   VerticalAlignment="Top"
+                   Margin="0,10,0,0"
+                   Fill="#66FFFFFF"
+                   Opacity="0.8"
+                   IsHitTestVisible="False">
+            <Ellipse.Effect>
+              <BlurEffect x:Name="HubHighlightBlur" Radius="7"/>
+            </Ellipse.Effect>
+          </Ellipse>
 
 					<TextBlock x:Name="HubText" 
                                Text="Root" 

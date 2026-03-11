@@ -3,6 +3,7 @@ using OrbitBubble.Core.Managers;
 using OrbitBubble.Core.Models;
 using OrbitBubble.Core.Repositories;
 using OrbitBubble.Core.Services;
+using OrbitBubble.Controls;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -33,6 +34,7 @@ public partial class MainWindow : Window {
   private bool _isDragging = false;
   private System.Windows.Point _clickPosition;
   private readonly IGlobalMouseHook _globalHook;
+  private UiQualityMode _qualityMode = UiQualityMode.Balanced;
 
   public MainWindow()
     : this(CreateDefaultDependencies()) {
@@ -111,6 +113,7 @@ public partial class MainWindow : Window {
     MainCanvas.Background = System.Windows.Media.Brushes.Transparent;
 
     _bubbleStateService.Initialize(_bubbleRepository.LoadAll()); // 程式啟動先載入
+    ApplyQualityMode(_qualityMode);
     // 監聽中心圓的右鍵
     CenterHub.MouseRightButtonUp += CenterHub_MouseRightButtonUp;
 
@@ -141,7 +144,52 @@ public partial class MainWindow : Window {
 
   private void CenterHub_MouseRightButtonUp(object sender, MouseButtonEventArgs e) {
     var menu = _menuFactory.CreateCenterHubMenu(() => Application.Current.Shutdown());
+    var qualityRoot = new MenuItem { Header = "畫質模式" };
+    qualityRoot.Items.Add(CreateQualityMenuItem("漂亮 (Pretty)", UiQualityMode.Pretty));
+    qualityRoot.Items.Add(CreateQualityMenuItem("平衡 (Balanced)", UiQualityMode.Balanced));
+    qualityRoot.Items.Add(CreateQualityMenuItem("效能 (Performance)", UiQualityMode.Performance));
+    menu.Items.Insert(2, qualityRoot);
+    menu.Items.Insert(3, new Separator());
     menu.IsOpen = true;
+  }
+
+  private MenuItem CreateQualityMenuItem(string text, UiQualityMode mode) {
+    var item = new MenuItem { Header = text, IsCheckable = true, IsChecked = _qualityMode == mode };
+    item.Click += (_, _) => ApplyQualityMode(mode);
+    return item;
+  }
+
+  private void ApplyQualityMode(UiQualityMode mode) {
+    _qualityMode = mode;
+    _bubbleViewFactory.QualityMode = mode;
+
+    foreach (var bubble in AnimationWrapper.Children.OfType<BubbleControl>()) {
+      bubble.QualityMode = mode;
+    }
+
+    switch (mode) {
+      case UiQualityMode.Pretty:
+        HubGlowEffect.BlurRadius = 16;
+        HubGlowEffect.Opacity = 0.82;
+        HubBody.Opacity = 0.92;
+        HubHighlight.Opacity = 0.95;
+        HubHighlightBlur.Radius = 8;
+        break;
+      case UiQualityMode.Performance:
+        HubGlowEffect.BlurRadius = 8;
+        HubGlowEffect.Opacity = 0.45;
+        HubBody.Opacity = 0.75;
+        HubHighlight.Opacity = 0.58;
+        HubHighlightBlur.Radius = 3;
+        break;
+      default:
+        HubGlowEffect.BlurRadius = 12;
+        HubGlowEffect.Opacity = 0.65;
+        HubBody.Opacity = 0.85;
+        HubHighlight.Opacity = 0.8;
+        HubHighlightBlur.Radius = 7;
+        break;
+    }
   }
 
   protected override void OnSourceInitialized(EventArgs e) {
@@ -315,11 +363,18 @@ public partial class MainWindow : Window {
   }
 
   private void UpdateCenterHubText(string text) {
-
-    HubCircle.Stroke = System.Windows.Media.Brushes.Gold; // 進入集合變金色
-    // 假設您的 CenterHub 裡面有一個 TextBlock 叫 HubText
-    // 如果沒有，您可以在 XAML 的 CenterHub (Grid) 裡加一個
+    // 進入集合時切換為金色中心球
+    ApplyCenterHubAccent(Colors.Gold);
     HubText.Text = text;
+  }
+
+  private void ApplyCenterHubAccent(Color accent) {
+    HubGlowEffect.Color = accent;
+    HubBodyMiddleStop.Color = Color.FromArgb(170, accent.R, accent.G, accent.B);
+    HubBodyEdgeStop.Color = Color.FromArgb(122,
+      (byte)(accent.R * 0.35),
+      (byte)(accent.G * 0.35),
+      (byte)(accent.B * 0.35));
   }
 
   private nint HwndHook(nint hwnd, int msg, nint wParam, nint lParam, ref bool handled) {
@@ -346,7 +401,7 @@ public partial class MainWindow : Window {
       _bubbleStateService.ResetToRoot();
 
       // 修正這裡：控制內部的 Ellipse 物件
-      HubCircle.Stroke = System.Windows.Media.Brushes.Cyan;
+      ApplyCenterHubAccent(Colors.Cyan);
       HubText.Text = BubbleConstants.RootHubText;
 
       RefreshLayout();
@@ -592,7 +647,7 @@ public partial class MainWindow : Window {
     if (_bubbleStateService.TryBackToParent()) {
 
       // 2. 恢復 CenterHub 視覺：變回青藍色
-      HubCircle.Stroke = System.Windows.Media.Brushes.Cyan;
+      ApplyCenterHubAccent(Colors.Cyan);
       HubText.Text = BubbleConstants.RootHubText; // 回到主層級清空文字
 
       RefreshLayout();

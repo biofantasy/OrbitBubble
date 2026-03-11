@@ -1,0 +1,83 @@
+<UserControl x:Class="OrbitBubble.Controls.BubbleControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="Root"
+             Width="{Binding BubbleSize, ElementName=Root}"
+             Height="{Binding BubbleSize, ElementName=Root}"
+             SnapsToDevicePixels="True"
+             UseLayoutRounding="True"
+             Background="Transparent">
+    <UserControl.Resources>
+        <Style x:Key="BubbleButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid Width="{Binding BubbleSize, ElementName=Root}"
+                              Height="{Binding BubbleSize, ElementName=Root}"
+                              RenderTransformOrigin="0.5,0.5">
+                            <Ellipse Margin="3"
+                                     Opacity="{Binding BodyOpacity, ElementName=Root}">
+                                <Ellipse.Effect>
+                                    <DropShadowEffect Color="{Binding AccentColor, ElementName=Root}"
+                                                      BlurRadius="{Binding GlowBlurRadius, ElementName=Root}"
+                                                      ShadowDepth="0"
+                                                      Opacity="{Binding GlowOpacity, ElementName=Root}"/>
+                                </Ellipse.Effect>
+                                <Ellipse.Fill>
+                                    <RadialGradientBrush Center="0.35,0.3"
+                                                         GradientOrigin="0.25,0.2"
+                                                         RadiusX="0.9"
+                                                         RadiusY="0.9">
+                                        <GradientStop Color="#CCFFFFFF" Offset="0"/>
+                                        <GradientStop Color="{Binding BodyMiddleColor, ElementName=Root}" Offset="0.45"/>
+                                        <GradientStop Color="{Binding BodyEdgeColor, ElementName=Root}" Offset="1"/>
+                                    </RadialGradientBrush>
+                                </Ellipse.Fill>
+                            </Ellipse>
+
+                            <Ellipse Width="52"
+                                     Height="20"
+                                     VerticalAlignment="Top"
+                                     Margin="0,8,0,0"
+                                     Fill="#66FFFFFF"
+                                     Opacity="{Binding HighlightOpacity, ElementName=Root}"
+                                     IsHitTestVisible="False">
+                                <Ellipse.Effect>
+                                    <BlurEffect Radius="{Binding HighlightBlurRadius, ElementName=Root}"/>
+                                </Ellipse.Effect>
+                            </Ellipse>
+
+                            <StackPanel VerticalAlignment="Center"
+                                        HorizontalAlignment="Center"
+                                        Margin="0,4,0,0"
+                                        IsHitTestVisible="False">
+                                <Image Source="{Binding IconSource, ElementName=Root}"
+                                       Width="30"
+                                       Height="30"
+                                       SnapsToDevicePixels="True"
+                                       UseLayoutRounding="True"/>
+                                <TextBlock Text="{Binding Label, ElementName=Root}"
+                                           Foreground="White"
+                                           FontSize="8.8"
+                                           FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"
+                                           Margin="0,5,0,0"
+                                           MaxWidth="62"
+                                           TextAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Button x:Name="BubbleButton"
+            Style="{StaticResource BubbleButtonStyle}"
+            PreviewMouseLeftButtonDown="BubbleButton_PreviewMouseLeftButtonDown"
+            MouseRightButtonUp="BubbleButton_MouseRightButtonUp"/>
+</UserControl>
