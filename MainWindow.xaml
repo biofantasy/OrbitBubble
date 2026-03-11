@@ -7,7 +7,11 @@
 				AllowsTransparency="True"   
 				Background="Transparent"     
 				Topmost="True"
-				ShowInTaskbar="False">
+				ShowInTaskbar="False"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextHintingMode="Fixed">
 	<Grid>
 		<Canvas x:Name="MainCanvas" Background="Transparent">
 
@@ -36,7 +40,7 @@
 
 					<Ellipse x:Name="HubCircle" Fill="#CC222222" Stroke="Cyan" StrokeThickness="2">
 						<Ellipse.Effect>
-							<DropShadowEffect Color="Cyan" BlurRadius="20" ShadowDepth="0" Opacity="0.8"/>
+							<DropShadowEffect Color="Cyan" BlurRadius="12" ShadowDepth="0" Opacity="0.65"/>
 						</Ellipse.Effect>
 					</Ellipse>
 

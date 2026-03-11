@@ -3,10 +3,11 @@ using Windows.Win32.UI.Input.KeyboardAndMouse; // 包含 HOTKEY_MODIFIERS
 
 namespace OrbitBubble.Core.Managers;
 
-public class HotkeyManager {
+public class HotkeyManager : IHotkeyManager {
 
   private const int HOTKEY_ID = 9000; // 唯一的熱鍵 ID
   private nint _windowHandle;
+  public int HotkeyId => HOTKEY_ID;
 
   // 註冊熱鍵：預設為 Alt + Space
   public void Register(nint handle) {

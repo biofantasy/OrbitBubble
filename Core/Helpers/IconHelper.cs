@@ -29,7 +29,7 @@ public static class IconHelper {
   private const uint SHGFI_LARGEICON = 0x0; // 32x32
   private const uint SHGFI_USEFILEATTRIBUTES = 0x10;
 
-  public static ImageSource GetIcon(string path) {
+  public static ImageSource? GetIcon(string path) {
     SHFILEINFO shfi = new SHFILEINFO();
     // 獲取大圖示
     SHGetFileInfo(path, 0, ref shfi, (uint)Marshal.SizeOf(shfi), SHGFI_ICON | SHGFI_LARGEICON);

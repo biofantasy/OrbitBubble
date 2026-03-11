@@ -5,7 +5,7 @@ using System.Text;
 
 namespace OrbitBubble.Core.Helpers;
 
-public class GlobalMouseHook {
+public class GlobalMouseHook : IGlobalMouseHook {
 
   private const int WH_MOUSE_LL = 14;
   private const int WM_MOUSEMOVE = 0x0200;
@@ -17,10 +17,10 @@ public class GlobalMouseHook {
   public struct MSLLHOOKSTRUCT { public POINT pt; public uint mouseData, flags, time; public IntPtr dwExtraInfo; }
 
   public delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
-  private LowLevelMouseProc _proc;
+  private LowLevelMouseProc? _proc;
   private IntPtr _hookId = IntPtr.Zero;
 
-  public event Action<int, int> MouseMoved;
+  public event Action<int, int>? MouseMoved;
 
   public void Install() {
     _proc = HookCallback;

@@ -1,6 +1,8 @@
 ﻿using OrbitBubble.Core.Helpers;
 using OrbitBubble.Core.Managers;
 using OrbitBubble.Core.Models;
+using OrbitBubble.Core.Repositories;
+using OrbitBubble.Core.Services;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -17,26 +19,84 @@ namespace OrbitBubble;
 /// </summary>
 public partial class MainWindow : Window {
 
-  // 記錄導航路徑，如果是空的代表在「根目錄」
-  private Stack<List<BubbleItem>> _navHistory = new();
-  private List<BubbleItem> _currentViewBubbles = new(); // 當前畫面上顯示的資料
-  private List<BubbleItem> _allBubbles = new(); // 儲存所有加入的泡泡
   private FrameworkElement? _draggedElement; // 記錄當前拖曳的物件
-  private HotkeyManager _hotkeyManager = new();
+  private readonly IHotkeyManager _hotkeyManager;
+  private readonly IBubbleRepository _bubbleRepository;
+  private readonly GestureService _gestureService;
+  private readonly BubbleViewFactory _bubbleViewFactory;
+  private readonly BubbleLayoutService _bubbleLayoutService;
+  private readonly BubbleInteractionService _bubbleInteractionService;
+  private readonly BubbleStateService _bubbleStateService;
+  private readonly MenuAnimationService _menuAnimationService;
+  private readonly MenuFactory _menuFactory;
+  private readonly WindowRuntimeService _windowRuntimeService;
   private bool _isDragging = false;
   private System.Windows.Point _clickPosition;
-  private List<System.Windows.Point> _gesturePoints = new();
-  private double _accumulatedAngle = 0; // 累計旋轉角度
-  private System.Windows.Point _lastMousePos;
-  private bool _isRightDrawing = false;
-  private GlobalMouseHook _globalHook = new();
-  private int _skipCounter = 0;
+  private readonly IGlobalMouseHook _globalHook;
 
-  public MainWindow() {
+  public MainWindow()
+    : this(CreateDefaultDependencies()) {
+  }
+
+  private static MainWindowDependencies CreateDefaultDependencies() {
+    var iconCache = new IconCacheService();
+    var menuFactory = new MenuFactory();
+    return new MainWindowDependencies(
+      new HotkeyManager(),
+      new BubbleRepository(),
+      new GestureService(),
+      new BubbleViewFactory(iconCache, menuFactory),
+      new BubbleLayoutService(),
+      new BubbleInteractionService(),
+      new BubbleStateService(),
+      new MenuAnimationService(),
+      menuFactory,
+      new WindowRuntimeService(),
+      new GlobalMouseHook());
+  }
+
+  public MainWindow(MainWindowDependencies deps)
+    : this(
+      deps.HotkeyManager,
+      deps.BubbleRepository,
+      deps.GestureService,
+      deps.BubbleViewFactory,
+      deps.BubbleLayoutService,
+      deps.BubbleInteractionService,
+      deps.BubbleStateService,
+      deps.MenuAnimationService,
+      deps.MenuFactory,
+      deps.WindowRuntimeService,
+      deps.GlobalMouseHook) {
+  }
+
+  public MainWindow(
+    IHotkeyManager hotkeyManager,
+    IBubbleRepository bubbleRepository,
+    GestureService gestureService,
+    BubbleViewFactory bubbleViewFactory,
+    BubbleLayoutService bubbleLayoutService,
+    BubbleInteractionService bubbleInteractionService,
+    BubbleStateService bubbleStateService,
+    MenuAnimationService menuAnimationService,
+    MenuFactory menuFactory,
+    WindowRuntimeService windowRuntimeService,
+    IGlobalMouseHook globalHook) {
+    _hotkeyManager = hotkeyManager ?? throw new ArgumentNullException(nameof(hotkeyManager));
+    _bubbleRepository = bubbleRepository ?? throw new ArgumentNullException(nameof(bubbleRepository));
+    _gestureService = gestureService ?? throw new ArgumentNullException(nameof(gestureService));
+    _bubbleViewFactory = bubbleViewFactory ?? throw new ArgumentNullException(nameof(bubbleViewFactory));
+    _bubbleLayoutService = bubbleLayoutService ?? throw new ArgumentNullException(nameof(bubbleLayoutService));
+    _bubbleInteractionService = bubbleInteractionService ?? throw new ArgumentNullException(nameof(bubbleInteractionService));
+    _bubbleStateService = bubbleStateService ?? throw new ArgumentNullException(nameof(bubbleStateService));
+    _menuAnimationService = menuAnimationService ?? throw new ArgumentNullException(nameof(menuAnimationService));
+    _menuFactory = menuFactory ?? throw new ArgumentNullException(nameof(menuFactory));
+    _windowRuntimeService = windowRuntimeService ?? throw new ArgumentNullException(nameof(windowRuntimeService));
+    _globalHook = globalHook ?? throw new ArgumentNullException(nameof(globalHook));
 
     InitializeComponent();
-    // 讓整個視窗的動畫渲染優先權提高，解決卡頓
-    this.SetValue(RenderOptions.EdgeModeProperty, EdgeMode.Aliased);
+    // 使用預設抗鋸齒，避免邊緣與文字在透明視窗中過度粗糙
+    this.SetValue(RenderOptions.EdgeModeProperty, EdgeMode.Unspecified);
 
     // 關鍵：使用 VirtualScreen 涵蓋所有螢幕
     this.Left = SystemParameters.VirtualScreenLeft;
@@ -50,7 +110,7 @@ public partial class MainWindow : Window {
     // 3. 確保背景是透明但「存在」的，這樣才抓得到全域事件
     MainCanvas.Background = System.Windows.Media.Brushes.Transparent;
 
-    (_allBubbles, _currentViewBubbles) = BubbleDataManager.LoadData(); // 程式啟動先載入
+    _bubbleStateService.Initialize(_bubbleRepository.LoadAll()); // 程式啟動先載入
     // 監聽中心圓的右鍵
     CenterHub.MouseRightButtonUp += CenterHub_MouseRightButtonUp;
 
@@ -61,10 +121,8 @@ public partial class MainWindow : Window {
     RefreshLayout();
 
     _globalHook.MouseMoved += (x, y) => {
-      //_skipCounter++;
-      //if (_skipCounter % 4 != 0) return; // 每 4 次移動才處理 1 次，直接省下 75% 的運算量
-      // 使用 Dispatcher 回到 UI 執行緒執行手勢判斷與 UI 更新
-      this.Dispatcher.Invoke(() => {
+      // 使用非同步排程，避免全域滑鼠事件阻塞 UI 執行緒
+      this.Dispatcher.BeginInvoke(() => {
         // 不管視窗是 Visible 還是 Collapsed，都由 GlobalHook 驅動偵測
         // 這樣就不會因為滑鼠「離清單太遠」而收不到事件
         DetectCircleGesture(new System.Windows.Point(x, y));
@@ -82,18 +140,7 @@ public partial class MainWindow : Window {
   }
 
   private void CenterHub_MouseRightButtonUp(object sender, MouseButtonEventArgs e) {
-    var menu = new ContextMenu();
-
-    var setHotkey = new MenuItem { Header = "設定熱鍵 (Alt+Space)" };
-    var setGesture = new MenuItem { Header = "手勢靈敏度設定" };
-    var exitApp = new MenuItem { Header = "結束程式" };
-    exitApp.Click += (s, a) => Application.Current.Shutdown();
-
-    menu.Items.Add(setHotkey);
-    menu.Items.Add(setGesture);
-    menu.Items.Add(new Separator());
-    menu.Items.Add(exitApp);
-
+    var menu = _menuFactory.CreateCenterHubMenu(() => Application.Current.Shutdown());
     menu.IsOpen = true;
   }
 
@@ -120,18 +167,14 @@ public partial class MainWindow : Window {
   /// 拖曳事件初始化
   /// </summary>
   private void InitializeDragEvents() {
-
-    CenterHub.MouseLeftButtonDown += CenterHub_MouseLeftButtonDown;
-
     this.MouseMove += Window_MouseMove;
-
     this.MouseLeftButtonUp += Window_MouseLeftButtonUp;
   }
 
   private void CenterHub_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) {
 
     // 如果目前在子層級，且只是輕點一下 (ClickCount == 1)
-    if (_navHistory.Count > 0 && e.ClickCount == 1) {
+    if (!_bubbleStateService.IsAtRoot && e.ClickCount == 1) {
       BackToParent();
       e.Handled = true;
       return;
@@ -151,23 +194,8 @@ public partial class MainWindow : Window {
   private void Window_MouseMove(object sender, MouseEventArgs e) {
     if (_isDragging && _draggedElement != null) {
       System.Windows.Point currentPos = e.GetPosition(this);
-      double deltaX = currentPos.X - _clickPosition.X;
-      double deltaY = currentPos.Y - _clickPosition.Y;
-
-      // 無論是中心圓還是泡泡，統一移動 Canvas 座標
-      double left = Canvas.GetLeft(_draggedElement);
-      double top = Canvas.GetTop(_draggedElement);
-
-      // 防呆：如果是 NaN 則初始化位置
-      if (double.IsNaN(left)) left = 0;
-      if (double.IsNaN(top)) top = 0;
-
-      Canvas.SetLeft(_draggedElement, left + deltaX);
-      Canvas.SetTop(_draggedElement, top + deltaY);
-
-      // 重要：每次移動後更新基準點，否則會噴射
+      _bubbleInteractionService.MoveElement(_draggedElement, _clickPosition, currentPos);
       _clickPosition = currentPos;
-      HandleDragging(e.GetPosition(this));
       return;
     }
 
@@ -218,17 +246,11 @@ public partial class MainWindow : Window {
     var data = element.Tag as BubbleItem;
     if (data == null) return;
 
-    int index = _currentViewBubbles.IndexOf(data);
-    int total = _currentViewBubbles.Count;
-
-    // 回彈目標是相對於舞台中心的 (400, 400)
-    double centerX = 400;
-    double centerY = 400;
-    double radius = 180;
-    double angle = index * Math.PI * 2 / total;
-
-    double targetX = centerX + radius * Math.Cos(angle) - (element.ActualWidth / 2);
-    double targetY = centerY + radius * Math.Sin(angle) - (element.ActualHeight / 2);
+    int index = _bubbleStateService.CurrentViewBubbles.IndexOf(data);
+    int total = _bubbleStateService.CurrentViewBubbles.Count;
+    var target = _bubbleLayoutService.CalculateBubblePosition(index, total, element.ActualWidth, element.ActualHeight, GetOrbitCenter());
+    double targetX = target.X;
+    double targetY = target.Y;
 
     DoubleAnimation animX = new DoubleAnimation(Canvas.GetLeft(element), targetX, TimeSpan.FromSeconds(0.4)) {
       EasingFunction = new BackEase { Amplitude = 0.3, EasingMode = EasingMode.EaseOut }
@@ -261,8 +283,8 @@ public partial class MainWindow : Window {
 
     try {
       // 如果是集合，則執行展開邏輯（我們之前討論過的切換層級）
-      // 關鍵：如果 SubItems 有東西，或者是我們定義的 "Collection" 路徑
-      if (data.SubItems.Count > 0 || data.Path == "Collection") {
+      // 關鍵：如果 SubItems 有東西，或者是集合路徑
+      if (data.SubItems.Count > 0 || data.Path == BubbleConstants.CollectionPath) {
         ExpandCollection(data); // 進入子層級
       } else {
         // 如果是單一檔案或資料夾，直接開啟
@@ -283,10 +305,7 @@ public partial class MainWindow : Window {
   private void ExpandCollection(BubbleItem collection) {
 
     // 1. 儲存目前內容到歷史，以便回退
-    _navHistory.Push(new List<BubbleItem>(_currentViewBubbles));
-
-    // 將當前資料源替換為集合內的子項目
-    _currentViewBubbles = collection.SubItems;
+    _bubbleStateService.ExpandCollection(collection);
 
     // 4. 更新中間 Menu 顯示名稱
     UpdateCenterHubText(collection.Name);
@@ -304,9 +323,7 @@ public partial class MainWindow : Window {
   }
 
   private nint HwndHook(nint hwnd, int msg, nint wParam, nint lParam, ref bool handled) {
-    const int WM_HOTKEY = 0x0312;
-
-    if (msg == WM_HOTKEY && wParam.ToInt32() == 9000) {
+    if (_windowRuntimeService.IsHotkeyMessage(msg, wParam, _hotkeyManager.HotkeyId)) {
       OnHotkeyTriggered();
       handled = true;
     }
@@ -326,13 +343,11 @@ public partial class MainWindow : Window {
       UpdatePositionToMouse();
 
       // 每次開啟都重置導航到最頂層
-      _navHistory.Clear();
-      // 確保目前視角等於所有泡泡
-      _currentViewBubbles = new List<BubbleItem>(_allBubbles);
+      _bubbleStateService.ResetToRoot();
 
       // 修正這裡：控制內部的 Ellipse 物件
       HubCircle.Stroke = System.Windows.Media.Brushes.Cyan;
-      HubText.Text = "Root";
+      HubText.Text = BubbleConstants.RootHubText;
 
       RefreshLayout();
 
@@ -343,50 +358,22 @@ public partial class MainWindow : Window {
     }
   }
 
-  [System.Runtime.InteropServices.DllImport("user32.dll")]
-  static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+  public bool IsMenuVisible => this.Visibility == Visibility.Visible;
 
-  private const uint SWP_NOSIZE = 0x0001;
-  private const uint SWP_NOZORDER = 0x0004;
-  private const uint SWP_SHOWWINDOW = 0x0040;
+  public void ToggleMenuFromTray() {
+    OnHotkeyTriggered();
+  }
 
   private void UpdatePositionToMouse() {
-    System.Drawing.Point p;
-    if (Windows.Win32.PInvoke.GetCursorPos(out p)) {
-      var source = PresentationSource.FromVisual(this);
-      if (source?.CompositionTarget != null) {
-        var m = source.CompositionTarget.TransformFromDevice;
-        var dipMousePos = m.Transform(new System.Windows.Point(p.X, p.Y));
-
-        // 計算相對於 VirtualScreen 的絕對位置
-        double mouseOnCanvasX = dipMousePos.X - SystemParameters.VirtualScreenLeft;
-        double mouseOnCanvasY = dipMousePos.Y - SystemParameters.VirtualScreenTop;
-
-        // 重點：移動 AnimationWrapper，讓它的中心點 (400, 400) 對準滑鼠
-        Canvas.SetLeft(AnimationWrapper, mouseOnCanvasX - 400);
-        Canvas.SetTop(AnimationWrapper, mouseOnCanvasY - 400);
-
-        // 強制 UI 刷新位置，避免動畫抓到舊座標
-        this.UpdateLayout();
-      }
+    var orbitCenter = GetOrbitCenter();
+    if (_windowRuntimeService.TryUpdateWrapperToMouse(this, AnimationWrapper, orbitCenter.X, orbitCenter.Y)) {
+      // 強制 UI 刷新位置，避免動畫抓到舊座標
+      this.UpdateLayout();
     }
   }
 
   private void HideMenuWithAnimation() {
-    Duration duration = new Duration(TimeSpan.FromSeconds(0.3));
-    IEasingFunction ease = new QuarticEase { EasingMode = EasingMode.EaseIn };
-
-    // 縮放動畫
-    DoubleAnimation scaleAnim = new DoubleAnimation(0, duration) { EasingFunction = ease };
-
-    // 旋轉動畫 (捲回去：0 -> -180)
-    DoubleAnimation rotateAnim = new DoubleAnimation {
-      To = -180,
-      Duration = duration,
-      EasingFunction = ease
-    };
-
-    scaleAnim.Completed += (s, e) => {
+    _menuAnimationService.PlayHide(MainCanvas, MainScale, MainRotate, () => {
       // 不要設為 Collapsed，否則滑鼠手勢會失效
       this.Visibility = Visibility.Collapsed; // 先徹底隱藏
       MainCanvas.Opacity = 0; // 隱藏後立刻歸零，為下次開啟做準備
@@ -398,11 +385,7 @@ public partial class MainWindow : Window {
 
       ClearBubbles();
       ResetGesture(); // 清空手勢殘留
-    };
-
-    MainScale.BeginAnimation(ScaleTransform.ScaleXProperty, scaleAnim);
-    MainScale.BeginAnimation(ScaleTransform.ScaleYProperty, scaleAnim);
-    MainRotate.BeginAnimation(RotateTransform.AngleProperty, rotateAnim);
+    });
   }
 
   private void ClearBubbles() {
@@ -414,18 +397,8 @@ public partial class MainWindow : Window {
   }
 
   private async void ShowMenuWithAnimation() {
-    // 1. 初始化狀態：確保舞台與畫布先隱藏
-    this.Visibility = Visibility.Visible;
-    MainCanvas.Opacity = 0;
-
-    // 重置動畫狀態（解除屬性鎖定）
-    MainScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-    MainScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-    MainRotate.BeginAnimation(RotateTransform.AngleProperty, null);
-
-    MainScale.ScaleX = 0;
-    MainScale.ScaleY = 0;
-    MainRotate.Angle = -180; // 初始旋轉角度
+    // 1. 初始化顯示狀態
+    _menuAnimationService.PrepareShowState(this, MainCanvas, MainScale, MainRotate);
 
     // 2. 核心定位：讓舞台中心對準滑鼠
     // 這裡調用 UpdatePositionToMouse，它會執行 Canvas.SetLeft(AnimationWrapper, mouseX - 400)
@@ -437,38 +410,12 @@ public partial class MainWindow : Window {
 
     // 4. 重置手勢快照，避免舊的滑鼠軌跡干擾
     ResetGesture();
-    _lastMousePos = new System.Windows.Point(-1, -1);
 
-    // 5. 設定動畫參數
-    Duration duration = new Duration(TimeSpan.FromSeconds(0.4));
-
-    // 彈出效果：使用 BackEase 讓它有一點點回彈感
-    IEasingFunction backEase = new BackEase {
-      Amplitude = 0.5,
-      EasingMode = EasingMode.EaseOut
-    };
-
-    // 旋轉效果：使用 QuarticEase 讓轉動由快變慢
-    IEasingFunction quartEase = new QuarticEase {
-      EasingMode = EasingMode.EaseOut
-    };
-
-    // 6. 建立動畫物件
-    var expandAnim = new DoubleAnimation(0, 1, duration) { EasingFunction = backEase };
-    var opacityAnim = new DoubleAnimation(0, 1, duration);
-    var rotateAnim = new DoubleAnimation(-180, 0, duration) { EasingFunction = quartEase };
-
-    // 強制 60 FPS (如果電腦效能足夠)
-    Timeline.SetDesiredFrameRate(expandAnim, 60);
-
-    // 7. 同步執行重新佈局 (生成泡泡)
+    // 5. 同步執行重新佈局 (生成泡泡)
     RefreshLayout();
 
-    // 8. 啟動動畫
-    MainCanvas.BeginAnimation(Canvas.OpacityProperty, opacityAnim);
-    MainScale.BeginAnimation(ScaleTransform.ScaleXProperty, expandAnim);
-    MainScale.BeginAnimation(ScaleTransform.ScaleYProperty, expandAnim);
-    MainRotate.BeginAnimation(RotateTransform.AngleProperty, rotateAnim);
+    // 6. 啟動動畫
+    _menuAnimationService.PlayShow(MainCanvas, MainScale, MainRotate);
 
     // 確保視窗獲取焦點
     this.Activate();
@@ -478,29 +425,11 @@ public partial class MainWindow : Window {
   private bool CheckForMerger(UIElement draggedBubble) {
     // 改從 AnimationWrapper 找，而不是 MainCanvas
     var allItems = AnimationWrapper.Children.OfType<FrameworkElement>().ToList();
+    var target = _bubbleInteractionService.FindMergeTarget(allItems, draggedBubble, CenterHub, 50);
+    if (target == null) return false;
 
-    foreach (var other in allItems) {
-      if (other == draggedBubble || other == CenterHub) continue;
-
-      if (other.Tag is BubbleItem && GetDistance(draggedBubble, other) < 50) {
-        MergeBubbles(other, draggedBubble);
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private double GetDistance(UIElement e1, UIElement e2) {
-    // 取得第一個泡泡的中心點
-    double x1 = Canvas.GetLeft(e1) + (e1 as FrameworkElement).ActualWidth / 2;
-    double y1 = Canvas.GetTop(e1) + (e1 as FrameworkElement).ActualHeight / 2;
-
-    // 取得第二個泡泡的中心點
-    double x2 = Canvas.GetLeft(e2) + (e2 as FrameworkElement).ActualWidth / 2;
-    double y2 = Canvas.GetTop(e2) + (e2 as FrameworkElement).ActualHeight / 2;
-
-    // 計算歐幾里得距離
-    return Math.Sqrt(Math.Pow(x1 - x2, 2) + Math.Pow(y1 - y2, 2));
+    MergeBubbles(target, draggedBubble);
+    return true;
   }
 
   private void MergeBubbles(UIElement target, UIElement source) {
@@ -513,42 +442,18 @@ public partial class MainWindow : Window {
     if (targetData == null || sourceData == null) return;
 
     // 1. 建立新的集合物件
-    var collectionData = new BubbleItem {
-      Name = "Merge",
-      Path = "Collection",
-      SubItems = new List<BubbleItem>()
-    };
-
-    // 2. 處理子項目的轉移 (處理原本就是集合的情況)
-    if (targetData.SubItems != null && targetData.SubItems.Count > 0)
-      collectionData.SubItems.AddRange(targetData.SubItems);
-    else
-      collectionData.SubItems.Add(targetData);
-
-    if (sourceData.SubItems != null && sourceData.SubItems.Count > 0)
-      collectionData.SubItems.AddRange(sourceData.SubItems);
-    else
-      collectionData.SubItems.Add(sourceData);
+    var collectionData = _bubbleInteractionService.CreateMergedCollection(targetData, sourceData);
 
     // 3. 重要：從「當前顯示清單」中移除這兩個，並換成新的集合
     // 這樣其他的泡泡就會被保留在 _currentViewBubbles 中
-    _currentViewBubbles.Remove(targetData);
-    _currentViewBubbles.Remove(sourceData);
-    _currentViewBubbles.Add(collectionData);
-
-    // 4. 同步更新全域資料庫 (如果你在根目錄合併)
-    if (_navHistory.Count == 0) {
-      _allBubbles.Remove(targetData);
-      _allBubbles.Remove(sourceData);
-      _allBubbles.Add(collectionData);
-    }
+    _bubbleStateService.ApplyMerge(targetData, sourceData, collectionData);
 
     // 5. 重新佈局 (這會根據更新後的 _currentViewBubbles 畫出所有剩下的泡泡)
     RefreshLayout();
 
     PlayMergeEffect(CenterHub);
 
-    BubbleDataManager.SaveData(_allBubbles);
+    _bubbleRepository.SaveAll(_bubbleStateService.AllBubbles);
   }
 
   private void RefreshLayout() {
@@ -556,8 +461,8 @@ public partial class MainWindow : Window {
     ClearBubbles(); // 清空畫面
 
     // 這裡改用非同步載入，避免一次擠爆 UI 執行緒
-    for (int i = 0; i < _currentViewBubbles.Count; i++) {
-      AddBubble(_currentViewBubbles[i], i, _currentViewBubbles.Count);
+    for (int i = 0; i < _bubbleStateService.CurrentViewBubbles.Count; i++) {
+      AddBubble(_bubbleStateService.CurrentViewBubbles[i], i, _bubbleStateService.CurrentViewBubbles.Count);
     }
   }
 
@@ -619,18 +524,13 @@ public partial class MainWindow : Window {
   }
 
   private void AddBubble(BubbleItem data, int index, int totalCount) {
-    var bubble = CreateBubbleVisual(data);
+    var bubble = _bubbleViewFactory.CreateBubble(data, Bubble_MouseLeftButtonDown, OnBubbleDeleteRequested);
     AnimationWrapper.Children.Add(bubble);
 
-    // 舞台中心點固定為 400, 400
-    double centerX = 400;
-    double centerY = 400;
-    double radius = 180;
-    double angle = index * Math.PI * 2 / totalCount;
-
-    // 計算相對於 800x800 舞台的座標
-    double x = centerX + radius * Math.Cos(angle) - (75 / 2);
-    double y = centerY + radius * Math.Sin(angle) - (75 / 2);
+    // 由佈局服務統一計算座標，讓 MainWindow 只負責呈現
+    var position = _bubbleLayoutService.CalculateBubblePosition(index, totalCount, bubble.Width, bubble.Height, GetOrbitCenter());
+    double x = position.X;
+    double y = position.Y;
 
     Canvas.SetLeft(bubble, x);
     Canvas.SetTop(bubble, y);
@@ -647,91 +547,23 @@ public partial class MainWindow : Window {
     bubble.RenderTransform.BeginAnimation(ScaleTransform.ScaleYProperty, expand);
   }
 
-  // 建立一個方法來產生泡泡 UI
-  private FrameworkElement CreateBubbleVisual(BubbleItem data) {
-    // 建立容器
-    Grid container = new Grid {
-      Width = 75, Height = 75,
-      Background = System.Windows.Media.Brushes.Transparent, // <--- 必須加這個，拖曳才靈敏
-      RenderTransformOrigin = new System.Windows.Point(0.5, 0.5),
-      RenderTransform = new ScaleTransform(0, 0),
-      //CacheMode = new BitmapCache(), // 【核心】交給 GPU 快取，大幅提升旋轉與移動效能
-      Tag = data
-    };
-
-    // 1. 底色圓圈 (稍微加點發光感)
-    Ellipse circle = new Ellipse {
-      Fill = new SolidColorBrush(System.Windows.Media.Color.FromArgb(200, 20, 20, 20)),
-      Stroke = System.Windows.Media.Brushes.Cyan,
-      StrokeThickness = 1.5,
-      Effect = new System.Windows.Media.Effects.DropShadowEffect {
-        Color = Colors.Cyan,
-        BlurRadius = 8,
-        ShadowDepth = 0,
-        Opacity = 0.5,
-        //RenderingBias = RenderingBias.Performance // 效能模式
-      }
-    };
-
-    // 2. 檔案圖示
-    System.Windows.Controls.Image img = new System.Windows.Controls.Image {
-      Source = IconHelper.GetIcon(data.Path), // 核心：提取圖示
-      Width = 32, Height = 32,
-      VerticalAlignment = VerticalAlignment.Center,
-      Margin = new Thickness(0, 0, 0, 15) // 往上移一點，留空間給文字
-    };
-
-    // 判斷是否為集合
-    if (data.SubItems.Count > 0 || data.Path == "Collection") {
-      // 顯示 Windows 預設資料夾圖示 (可以使用之前寫的 IconHelper 抓一個空資料夾的路徑)
-      string folderPath = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-      img.Source = IconHelper.GetIcon(folderPath);
-      data.Name = "Merge"; // 強制顯示 Merge 字樣
-      circle.Stroke = System.Windows.Media.Brushes.Gold;
-    } else {
-      img.Source = IconHelper.GetIcon(data.Path);
+  private void OnBubbleDeleteRequested(BubbleItem data) {
+    if (_bubbleStateService.RemoveBubble(data)) {
+      RefreshLayout();
+      _bubbleRepository.SaveAll(_bubbleStateService.AllBubbles);
     }
+  }
 
-    // 3. 檔名文字 (縮小並放在底部)
-    TextBlock txt = new TextBlock {
-      Text = data.Name,
-      Foreground = System.Windows.Media.Brushes.White,
-      FontSize = 9,
-      VerticalAlignment = VerticalAlignment.Bottom,
-      HorizontalAlignment = HorizontalAlignment.Center,
-      Margin = new Thickness(5, 0, 5, 8),
-      TextTrimming = TextTrimming.CharacterEllipsis,
-      MaxWidth = 60
-    };
+  private Point GetOrbitCenter() {
+    double left = Canvas.GetLeft(CenterHub);
+    double top = Canvas.GetTop(CenterHub);
 
-    // 確保內部的元件都不會攔截滑鼠事件，讓事件統一由 container (Grid) 處理
-    circle.IsHitTestVisible = false;
-    img.IsHitTestVisible = false;
-    txt.IsHitTestVisible = false;
+    if (double.IsNaN(left)) left = 350;
+    if (double.IsNaN(top)) top = 350;
 
-    container.Children.Add(circle);
-    container.Children.Add(img);
-    container.Children.Add(txt);
-
-    // 在 container.MouseLeftButtonDown 附近加入
-    container.MouseRightButtonUp += (s, e) => {
-      var menu = new ContextMenu();
-      var deleteItem = new MenuItem { Header = "刪除此泡泡", Foreground = System.Windows.Media.Brushes.Red };
-      deleteItem.Click += (ms, ma) => {
-        _allBubbles.Remove(data);
-        _currentViewBubbles.Remove(data);
-        RefreshLayout();
-        BubbleDataManager.SaveData(_allBubbles);
-      };
-      menu.Items.Add(deleteItem);
-      menu.IsOpen = true;
-      e.Handled = true; // 防止觸發背景事件
-    };
-
-    // 掛載事件
-    container.MouseLeftButtonDown += Bubble_MouseLeftButtonDown;
-
-    return container;
+    double width = CenterHub.ActualWidth > 0 ? CenterHub.ActualWidth : CenterHub.Width;
+    double height = CenterHub.ActualHeight > 0 ? CenterHub.ActualHeight : CenterHub.Height;
+    return new Point(left + (width / 2), top + (height / 2));
   }
 
   private void CenterHub_DragOver(object sender, DragEventArgs e) {
@@ -746,169 +578,38 @@ public partial class MainWindow : Window {
     if (e.Data.GetDataPresent(DataFormats.FileDrop)) {
       string[] files = (string[])e.Data.GetData(DataFormats.FileDrop);
 
-      // 篩選掉已經存在的路徑
-      var newFiles = files.Where(f => !_allBubbles.Any(b => b.Path == f)).ToList();
+      // 交由狀態服務處理去重與資料更新
+      var newFiles = _bubbleStateService.AddFiles(files);
 
       if (newFiles.Count == 0) return; // 如果全部都重複，就不執行
 
-      // 1. 先獲取目前的總數基數
-      int baseCount = _allBubbles.Count;
-      int newTotal = baseCount + files.Length;
-
-      for (int i = 0; i < files.Length; i++) {
-        var newItem = new BubbleItem {
-          Name = System.IO.Path.GetFileName(files[i]),
-          Path = files[i]
-        };
-
-        _allBubbles.Add(newItem);
-
-        // 2. 這裡的 index 必須是 (基礎數量 + 當前循環次數)
-        // 3. 這裡的 totalCount 必須是 (原本的 + 這次所有要加的)
-        AddBubble(newItem, baseCount + i, newTotal);
-      }
-
-      BubbleDataManager.SaveData(_allBubbles);
+      RefreshLayout();
+      _bubbleRepository.SaveAll(_bubbleStateService.AllBubbles);
     }
   }
 
   private void BackToParent() {
-    if (_navHistory.Count > 0) {
-      // 1. 回復上一層數據
-      _currentViewBubbles = _navHistory.Pop();
+    if (_bubbleStateService.TryBackToParent()) {
 
       // 2. 恢復 CenterHub 視覺：變回青藍色
       HubCircle.Stroke = System.Windows.Media.Brushes.Cyan;
-      HubText.Text = "Root"; // 回到主層級清空文字
+      HubText.Text = BubbleConstants.RootHubText; // 回到主層級清空文字
 
-      // 3. 刷新畫面
       RefreshLayout();
     }
   }
 
-  private System.Windows.Point? _gestureCenter = null;
-
   private void DetectCircleGesture(System.Windows.Point currentPos) {
-    _gesturePoints.Add(currentPos);
-
-    // 1. 初始化參考點：如果還沒固定圓心，且點夠多了，就抓平均值固定下來
-    if (_gesturePoints.Count == 10) {
-      _gestureCenter = new System.Windows.Point(
-          _gesturePoints.Average(p => p.X),
-          _gesturePoints.Average(p => p.Y)
-      );
-      _lastMousePos = currentPos;
-      return;
+    var trigger = _gestureService.ProcessPoint(currentPos, this.Visibility == Visibility.Visible);
+    if (trigger == GestureTrigger.OpenMenu) {
+      OnHotkeyTriggered();
+    } else if (trigger == GestureTrigger.CloseMenu) {
+      HideMenuWithAnimation();
     }
-
-    if (_gesturePoints.Count < 10 || _gestureCenter == null) {
-      _lastMousePos = currentPos;
-      return;
-    }
-
-    // 2. 向量計算 (使用固定的圓心)
-    var center = _gestureCenter.Value;
-    var vLast = _lastMousePos - center;
-    var vCurrent = currentPos - center;
-
-    // 在向量計算後加入
-    double distance = vCurrent.Length;
-    //if (distance < 40 || distance > 300) {
-    //  // 太小（原地抖動）或太大（跨螢幕瞬移）都不算轉圈
-    //  _lastMousePos = currentPos;
-    //  return;
-    //}
-
-    if (distance < 30 ) {
-      // 太小（原地抖動）或太大（跨螢幕瞬移）都不算轉圈
-      _lastMousePos = currentPos;
-      return;
-    }
-
-    double angleLast = Math.Atan2(vLast.Y, vLast.X);
-    double angleCurrent = Math.Atan2(vCurrent.Y, vCurrent.X);
-    double deltaAngle = (angleCurrent - angleLast) * (180 / Math.PI);
-
-    // 處理跳變
-    if (deltaAngle > 180) deltaAngle -= 360;
-    if (deltaAngle < -180) deltaAngle += 360;
-
-    // 4. 只有當 deltaAngle 超過一定門檻才累加（過濾掉微小的直線抖動）
-    if (Math.Abs(deltaAngle) > 0.5) {
-      _accumulatedAngle += deltaAngle;
-    }
-
-    System.Diagnostics.Debug.WriteLine($"Angle: {_accumulatedAngle:F1} | Pts: {_gesturePoints.Count}");
-
-    // 5. 判定觸發 (門檻降到 130 度，半圈多一點就觸發)
-    if (Math.Abs(_accumulatedAngle) > 130) {
-      bool isClockwise = _accumulatedAngle > 0;
-
-      if (isClockwise && this.Visibility != Visibility.Visible) {
-        this.Dispatcher.Invoke(() => OnHotkeyTriggered());
-        ResetGesture();
-      } else if (!isClockwise && this.Visibility == Visibility.Visible) {
-        this.Dispatcher.Invoke(() => HideMenuWithAnimation());
-        ResetGesture();
-      }
-    }
-
-    // 6. 自動重置機制：如果點太多了還沒觸發，代表不是在轉圈，清空重來
-    if (_gesturePoints.Count > 50) {
-      ResetGesture();
-    }
-
-    _lastMousePos = currentPos;
   }
 
   private void ResetGesture() {
-    _gesturePoints.Clear();
-    _accumulatedAngle = 0;
-    _gestureCenter = null;
-    //_sumX = 0; _sumY = 0;
+    _gestureService.Reset();
   }
 
-  private void HandleDragging(System.Windows.Point currentPos) {
-    double deltaX = currentPos.X - _clickPosition.X;
-    double deltaY = currentPos.Y - _clickPosition.Y;
-
-    double left = Canvas.GetLeft(_draggedElement);
-    double top = Canvas.GetTop(_draggedElement);
-
-    if (double.IsNaN(left)) left = 0;
-    if (double.IsNaN(top)) top = 0;
-
-    Canvas.SetLeft(_draggedElement, left + deltaX);
-    Canvas.SetTop(_draggedElement, top + deltaY);
-
-    _clickPosition = currentPos;
-  }
-
-  // 1. 在 Window 標籤增加 MouseRightButtonDown="Window_MouseRightButtonDown"
-  private void Window_MouseRightButtonDown(object sender, MouseButtonEventArgs e) {
-    _isRightDrawing = true;
-    _gesturePoints.Clear();
-    _accumulatedAngle = 0;
-    _lastMousePos = e.GetPosition(this);
-  }
-
-  // 3. 在 MouseRightButtonUp 結束
-  private void Window_MouseRightButtonUp(object sender, MouseButtonEventArgs e) {
-    _isRightDrawing = false;
-    ResetGesture();
-  }
-}
-
-// 輔助擴展，放類別外面或裡面都行
-public static class ExtensionMethods {
-  public static System.Threading.Tasks.Task NextFrame(this System.Windows.UIElement element) {
-    var tcs = new System.Threading.Tasks.TaskCompletionSource<object?>();
-    EventHandler handler = null!;
-    handler = (s, e) => {
-      System.Windows.Media.CompositionTarget.Rendering -= handler; // 務必卸載，否則會卡頓
-      tcs.TrySetResult(null);
-    };
-    System.Windows.Media.CompositionTarget.Rendering += handler;
-    return tcs.Task;
-  }
 }

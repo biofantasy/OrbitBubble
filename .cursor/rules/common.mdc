@@ -1,0 +1,35 @@
+---
+name: advice
+description: This is a new rule
+---
+
+# Architecture Principles
+- Follow layered architecture: Controller -> Service -> Repository -> Database.
+- Do not access database directly from controllers.
+- Use dependency injection instead of direct instantiation.
+- Program to interfaces where reasonable.
+- Keep components replaceable and loosely coupled.
+
+# Code Quality
+- Add Chinese comments for business logic.
+- Use clear and descriptive naming.
+- Include error handling and logging in important paths.
+- Avoid hard-coded dependencies and magic strings.
+
+# Configuration
+- Externalize configuration to appsettings.json or environment variables.
+- Avoid embedding credentials or environment-specific values in code.
+
+# Testing
+- Add unit tests for important business logic.
+- Prefer small, reviewable changes over broad rewrites.
+
+# Performance
+- Prefer lazy loading over loading everything at once.
+- Use caching only when it has a clear benefit.
+- Consider background services for long-running tasks.
+
+# Working Style
+- Before major refactors, propose a plan first.
+- Preserve existing architecture unless explicitly asked to change it.
+- When editing code, explain trade-offs briefly.
