@@ -61,8 +61,9 @@ public class BubbleInteractionService {
   /// 建立合併後的集合泡泡資料。
   /// </summary>
   public BubbleItem CreateMergedCollection(BubbleItem targetData, BubbleItem sourceData) {
+    string mergedName = ResolveMergedName(targetData, sourceData);
     var collectionData = new BubbleItem {
-      Name = BubbleConstants.MergedBubbleName,
+      Name = mergedName,
       Path = BubbleConstants.CollectionPath,
       SubItems = new List<BubbleItem>()
     };
@@ -80,5 +81,21 @@ public class BubbleInteractionService {
     }
 
     return collectionData;
+  }
+
+  private static bool IsCollectionBubble(BubbleItem item) {
+    return item.SubItems.Count > 0 || item.Path == BubbleConstants.CollectionPath;
+  }
+
+  private static string ResolveMergedName(BubbleItem targetData, BubbleItem sourceData) {
+    if (IsCollectionBubble(targetData) && !string.IsNullOrWhiteSpace(targetData.Name)) {
+      return targetData.Name;
+    }
+
+    if (IsCollectionBubble(sourceData) && !string.IsNullOrWhiteSpace(sourceData.Name)) {
+      return sourceData.Name;
+    }
+
+    return BubbleConstants.MergedBubbleName;
   }
 }

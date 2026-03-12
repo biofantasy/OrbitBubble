@@ -21,13 +21,15 @@ public partial class App : Application {
     // Composition root：集中組裝可替換元件，避免 MainWindow 直接硬編碼依賴
     var iconCache = new IconCacheService();
     var menuFactory = new MenuFactory();
+    var bubbleValidationService = new BubbleValidationService();
     _mainWindow = new MainWindow(
       new HotkeyManager(),
       new BubbleRepository(),
       new GestureService(),
-      new BubbleViewFactory(iconCache, menuFactory),
+      new BubbleViewFactory(iconCache, menuFactory, bubbleValidationService),
       new BubbleLayoutService(),
       new BubbleInteractionService(),
+      bubbleValidationService,
       new BubbleStateService(),
       new MenuAnimationService(),
       menuFactory,

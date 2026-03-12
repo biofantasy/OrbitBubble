@@ -55,20 +55,35 @@
                                         Margin="0,4,0,0"
                                         IsHitTestVisible="False">
                                 <Image Source="{Binding IconSource, ElementName=Root}"
-                                       Width="30"
-                                       Height="30"
+                                       Width="34"
+                                       Height="34"
                                        SnapsToDevicePixels="True"
                                        UseLayoutRounding="True"/>
                                 <TextBlock Text="{Binding Label, ElementName=Root}"
-                                           Foreground="White"
-                                           FontSize="8.8"
+                                           Foreground="{Binding LabelBrush, ElementName=Root}"
+                                           FontSize="10.5"
                                            FontWeight="SemiBold"
                                            HorizontalAlignment="Center"
                                            Margin="0,5,0,0"
-                                           MaxWidth="62"
+                                           MaxWidth="72"
                                            TextAlignment="Center"
                                            TextTrimming="CharacterEllipsis"/>
                             </StackPanel>
+
+                            <Grid Width="20"
+                                  Height="20"
+                                  HorizontalAlignment="Right"
+                                  VerticalAlignment="Top"
+                                  Margin="0,2,2,0"
+                                  Visibility="{Binding UnavailableBadgeVisibility, ElementName=Root}"
+                                  IsHitTestVisible="False">
+                                <Ellipse Fill="#E6E74C3C"/>
+                                <TextBlock Text="!"
+                                           Foreground="White"
+                                           FontWeight="Bold"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"/>
+                            </Grid>
                         </Grid>
                     </ControlTemplate>
                 </Setter.Value>

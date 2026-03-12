@@ -4,6 +4,7 @@ using OrbitBubble.Core.Models;
 using OrbitBubble.Core.Repositories;
 using OrbitBubble.Core.Services;
 using OrbitBubble.Controls;
+using Microsoft.VisualBasic;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -27,6 +28,7 @@ public partial class MainWindow : Window {
   private readonly BubbleViewFactory _bubbleViewFactory;
   private readonly BubbleLayoutService _bubbleLayoutService;
   private readonly BubbleInteractionService _bubbleInteractionService;
+  private readonly BubbleValidationService _bubbleValidationService;
   private readonly BubbleStateService _bubbleStateService;
   private readonly MenuAnimationService _menuAnimationService;
   private readonly MenuFactory _menuFactory;
@@ -43,13 +45,15 @@ public partial class MainWindow : Window {
   private static MainWindowDependencies CreateDefaultDependencies() {
     var iconCache = new IconCacheService();
     var menuFactory = new MenuFactory();
+    var bubbleValidationService = new BubbleValidationService();
     return new MainWindowDependencies(
       new HotkeyManager(),
       new BubbleRepository(),
       new GestureService(),
-      new BubbleViewFactory(iconCache, menuFactory),
+      new BubbleViewFactory(iconCache, menuFactory, bubbleValidationService),
       new BubbleLayoutService(),
       new BubbleInteractionService(),
+      bubbleValidationService,
       new BubbleStateService(),
       new MenuAnimationService(),
       menuFactory,
@@ -65,6 +69,7 @@ public partial class MainWindow : Window {
       deps.BubbleViewFactory,
       deps.BubbleLayoutService,
       deps.BubbleInteractionService,
+      deps.BubbleValidationService,
       deps.BubbleStateService,
       deps.MenuAnimationService,
       deps.MenuFactory,
@@ -79,6 +84,7 @@ public partial class MainWindow : Window {
     BubbleViewFactory bubbleViewFactory,
     BubbleLayoutService bubbleLayoutService,
     BubbleInteractionService bubbleInteractionService,
+    BubbleValidationService bubbleValidationService,
     BubbleStateService bubbleStateService,
     MenuAnimationService menuAnimationService,
     MenuFactory menuFactory,
@@ -90,6 +96,7 @@ public partial class MainWindow : Window {
     _bubbleViewFactory = bubbleViewFactory ?? throw new ArgumentNullException(nameof(bubbleViewFactory));
     _bubbleLayoutService = bubbleLayoutService ?? throw new ArgumentNullException(nameof(bubbleLayoutService));
     _bubbleInteractionService = bubbleInteractionService ?? throw new ArgumentNullException(nameof(bubbleInteractionService));
+    _bubbleValidationService = bubbleValidationService ?? throw new ArgumentNullException(nameof(bubbleValidationService));
     _bubbleStateService = bubbleStateService ?? throw new ArgumentNullException(nameof(bubbleStateService));
     _menuAnimationService = menuAnimationService ?? throw new ArgumentNullException(nameof(menuAnimationService));
     _menuFactory = menuFactory ?? throw new ArgumentNullException(nameof(menuFactory));
@@ -150,7 +157,23 @@ public partial class MainWindow : Window {
     qualityRoot.Items.Add(CreateQualityMenuItem("效能 (Performance)", UiQualityMode.Performance));
     menu.Items.Insert(2, qualityRoot);
     menu.Items.Insert(3, new Separator());
+    var cleanupInvalidItem = new MenuItem { Header = "清理失效連結" };
+    cleanupInvalidItem.Click += (_, _) => CleanupInvalidLinks();
+    menu.Items.Insert(4, cleanupInvalidItem);
+    menu.Items.Insert(5, new Separator());
     menu.IsOpen = true;
+  }
+
+  private void CleanupInvalidLinks() {
+    int removed = _bubbleValidationService.RemoveInvalidLinks(_bubbleStateService.AllBubbles);
+    if (removed <= 0) {
+      MessageBox.Show("未發現失效連結。");
+      return;
+    }
+
+    _bubbleRepository.SaveAll(_bubbleStateService.AllBubbles);
+    RefreshLayout();
+    MessageBox.Show($"已清理 {removed} 個失效連結。");
   }
 
   private MenuItem CreateQualityMenuItem(string text, UiQualityMode mode) {
@@ -169,24 +192,24 @@ public partial class MainWindow : Window {
 
     switch (mode) {
       case UiQualityMode.Pretty:
-        HubGlowEffect.BlurRadius = 16;
-        HubGlowEffect.Opacity = 0.82;
-        HubBody.Opacity = 0.92;
-        HubHighlight.Opacity = 0.95;
+        HubGlowEffect.BlurRadius = 22;
+        HubGlowEffect.Opacity = 0.78;
+        HubBody.Opacity = 0.84;
+        HubHighlight.Opacity = 0.88;
         HubHighlightBlur.Radius = 8;
         break;
       case UiQualityMode.Performance:
-        HubGlowEffect.BlurRadius = 8;
-        HubGlowEffect.Opacity = 0.45;
-        HubBody.Opacity = 0.75;
-        HubHighlight.Opacity = 0.58;
+        HubGlowEffect.BlurRadius = 10;
+        HubGlowEffect.Opacity = 0.38;
+        HubBody.Opacity = 0.68;
+        HubHighlight.Opacity = 0.48;
         HubHighlightBlur.Radius = 3;
         break;
       default:
-        HubGlowEffect.BlurRadius = 12;
-        HubGlowEffect.Opacity = 0.65;
-        HubBody.Opacity = 0.85;
-        HubHighlight.Opacity = 0.8;
+        HubGlowEffect.BlurRadius = 16;
+        HubGlowEffect.Opacity = 0.62;
+        HubBody.Opacity = 0.74;
+        HubHighlight.Opacity = 0.68;
         HubHighlightBlur.Radius = 7;
         break;
     }
@@ -579,7 +602,7 @@ public partial class MainWindow : Window {
   }
 
   private void AddBubble(BubbleItem data, int index, int totalCount) {
-    var bubble = _bubbleViewFactory.CreateBubble(data, Bubble_MouseLeftButtonDown, OnBubbleDeleteRequested);
+    var bubble = _bubbleViewFactory.CreateBubble(data, Bubble_MouseLeftButtonDown, OnBubbleDeleteRequested, OnBubbleRenameRequested);
     AnimationWrapper.Children.Add(bubble);
 
     // 由佈局服務統一計算座標，讓 MainWindow 只負責呈現
@@ -607,6 +630,24 @@ public partial class MainWindow : Window {
       RefreshLayout();
       _bubbleRepository.SaveAll(_bubbleStateService.AllBubbles);
     }
+  }
+
+  private void OnBubbleRenameRequested(BubbleItem data) {
+    var currentName = data.Name;
+    var newName = Interaction.InputBox("請輸入新名稱：", "更改名稱", currentName);
+
+    if (string.IsNullOrWhiteSpace(newName)) {
+      return;
+    }
+
+    newName = newName.Trim();
+    if (string.Equals(newName, currentName, StringComparison.Ordinal)) {
+      return;
+    }
+
+    data.Name = newName;
+    RefreshLayout();
+    _bubbleRepository.SaveAll(_bubbleStateService.AllBubbles);
   }
 
   private Point GetOrbitCenter() {

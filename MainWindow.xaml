@@ -40,7 +40,7 @@
 
           <Ellipse x:Name="HubBody" Margin="4" IsHitTestVisible="False" Opacity="0.85">
             <Ellipse.Effect>
-              <DropShadowEffect x:Name="HubGlowEffect" Color="Cyan" BlurRadius="12" ShadowDepth="0" Opacity="0.65"/>
+              <DropShadowEffect x:Name="HubGlowEffect" Color="Cyan" BlurRadius="16" ShadowDepth="0" Opacity="0.62"/>
             </Ellipse.Effect>
             <Ellipse.Fill>
               <RadialGradientBrush Center="0.35,0.3"

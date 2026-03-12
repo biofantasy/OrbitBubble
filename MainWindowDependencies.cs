@@ -12,6 +12,7 @@ public class MainWindowDependencies {
   public BubbleViewFactory BubbleViewFactory { get; }
   public BubbleLayoutService BubbleLayoutService { get; }
   public BubbleInteractionService BubbleInteractionService { get; }
+  public BubbleValidationService BubbleValidationService { get; }
   public BubbleStateService BubbleStateService { get; }
   public MenuAnimationService MenuAnimationService { get; }
   public MenuFactory MenuFactory { get; }
@@ -25,6 +26,7 @@ public class MainWindowDependencies {
     BubbleViewFactory bubbleViewFactory,
     BubbleLayoutService bubbleLayoutService,
     BubbleInteractionService bubbleInteractionService,
+    BubbleValidationService bubbleValidationService,
     BubbleStateService bubbleStateService,
     MenuAnimationService menuAnimationService,
     MenuFactory menuFactory,
@@ -36,6 +38,7 @@ public class MainWindowDependencies {
     BubbleViewFactory = bubbleViewFactory;
     BubbleLayoutService = bubbleLayoutService;
     BubbleInteractionService = bubbleInteractionService;
+    BubbleValidationService = bubbleValidationService;
     BubbleStateService = bubbleStateService;
     MenuAnimationService = menuAnimationService;
     MenuFactory = menuFactory;
