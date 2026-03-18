@@ -19,10 +19,13 @@ public class GlobalMouseHook : IGlobalMouseHook {
   public delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
   private LowLevelMouseProc? _proc;
   private IntPtr _hookId = IntPtr.Zero;
+  private bool _isInstalled;
 
   public event Action<int, int>? MouseMoved;
 
   public void Install() {
+    if (_isInstalled) return;
+
     _proc = HookCallback;
     // 使用 IntPtr.Zero 通常在這種情況下更穩定
     _hookId = SetWindowsHookEx(WH_MOUSE_LL, _proc, IntPtr.Zero, 0);
@@ -30,11 +33,17 @@ public class GlobalMouseHook : IGlobalMouseHook {
     if (_hookId == IntPtr.Zero) {
       int errorCode = Marshal.GetLastWin32Error();
       // 如果失敗，可以在這裡記錄錯誤碼碼
+      _isInstalled = false;
+      return;
     }
+    _isInstalled = true;
   }
 
   public void Uninstall() {
+    if (!_isInstalled || _hookId == IntPtr.Zero) return;
     UnhookWindowsHookEx(_hookId);
+    _hookId = IntPtr.Zero;
+    _isInstalled = false;
   }
 
   // 這個方法放在類別內

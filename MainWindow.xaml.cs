@@ -33,6 +33,7 @@ public partial class MainWindow : Window {
   private readonly MenuAnimationService _menuAnimationService;
   private readonly MenuFactory _menuFactory;
   private readonly WindowRuntimeService _windowRuntimeService;
+  private bool _gestureEnabled = true;
   private bool _isDragging = false;
   private System.Windows.Point _clickPosition;
   private readonly IGlobalMouseHook _globalHook;
@@ -133,13 +134,16 @@ public partial class MainWindow : Window {
     _globalHook.MouseMoved += (x, y) => {
       // 使用非同步排程，避免全域滑鼠事件阻塞 UI 執行緒
       this.Dispatcher.BeginInvoke(() => {
+        if (!_gestureEnabled) return;
         // 不管視窗是 Visible 還是 Collapsed，都由 GlobalHook 驅動偵測
         // 這樣就不會因為滑鼠「離清單太遠」而收不到事件
         DetectCircleGesture(new System.Windows.Point(x, y));
       });
     };
 
-    _globalHook.Install();
+    if (_gestureEnabled) {
+      _globalHook.Install();
+    }
   }
 
   // 記得在程式關閉時卸載，否則系統會變慢
@@ -151,16 +155,18 @@ public partial class MainWindow : Window {
 
   private void CenterHub_MouseRightButtonUp(object sender, MouseButtonEventArgs e) {
     var menu = _menuFactory.CreateCenterHubMenu(() => Application.Current.Shutdown());
+    var gestureItem = new MenuItem { Header = "啟用手勢", IsCheckable = true, IsChecked = _gestureEnabled };
+    gestureItem.Click += (_, _) => SetGestureEnabled(gestureItem.IsChecked);
     var qualityRoot = new MenuItem { Header = "畫質模式" };
     qualityRoot.Items.Add(CreateQualityMenuItem("漂亮 (Pretty)", UiQualityMode.Pretty));
     qualityRoot.Items.Add(CreateQualityMenuItem("平衡 (Balanced)", UiQualityMode.Balanced));
     qualityRoot.Items.Add(CreateQualityMenuItem("效能 (Performance)", UiQualityMode.Performance));
-    menu.Items.Insert(2, qualityRoot);
-    menu.Items.Insert(3, new Separator());
     var cleanupInvalidItem = new MenuItem { Header = "清理失效連結" };
     cleanupInvalidItem.Click += (_, _) => CleanupInvalidLinks();
-    menu.Items.Insert(4, cleanupInvalidItem);
-    menu.Items.Insert(5, new Separator());
+    menu.Items.Insert(0, gestureItem);
+    menu.Items.Insert(1, qualityRoot);
+    menu.Items.Insert(2, cleanupInvalidItem);
+    menu.Items.Insert(3, new Separator());
     menu.IsOpen = true;
   }
 
@@ -437,6 +443,18 @@ public partial class MainWindow : Window {
   }
 
   public bool IsMenuVisible => this.Visibility == Visibility.Visible;
+  public bool IsGestureEnabled => _gestureEnabled;
+
+  public void SetGestureEnabled(bool enabled) {
+    if (_gestureEnabled == enabled) return;
+    _gestureEnabled = enabled;
+    if (_gestureEnabled) {
+      _globalHook.Install();
+    } else {
+      ResetGesture();
+      _globalHook.Uninstall();
+    }
+  }
 
   public void ToggleMenuFromTray() {
     OnHotkeyTriggered();

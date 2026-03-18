@@ -7,14 +7,9 @@ namespace OrbitBubble.Core.Services;
 public class MenuFactory {
   public ContextMenu CreateCenterHubMenu(Action onExitRequested) {
     var menu = new ContextMenu();
-    var setHotkey = new MenuItem { Header = "設定熱鍵 (Alt+Space)" };
-    var setGesture = new MenuItem { Header = "手勢靈敏度設定" };
     var exitApp = new MenuItem { Header = "結束程式" };
     exitApp.Click += (_, _) => onExitRequested();
 
-    menu.Items.Add(setHotkey);
-    menu.Items.Add(setGesture);
-    menu.Items.Add(new Separator());
     menu.Items.Add(exitApp);
     return menu;
   }
