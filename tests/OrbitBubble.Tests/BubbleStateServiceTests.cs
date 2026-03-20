@@ -36,4 +36,41 @@ public class BubbleStateServiceTests {
     Assert.Equal(3, service.AllBubbles.Count);
     Assert.Equal(3, service.CurrentViewBubbles.Count);
   }
+
+  [Fact]
+  public void MoveCurrentBubbleToParent_WhenInCollection_MovesItemToUpperLevel() {
+    var service = new BubbleStateService();
+    var inner = new BubbleItem { Name = "inner", Path = "C:\\tmp\\inner.txt" };
+    var collection = new BubbleItem {
+      Name = "merge",
+      Path = BubbleConstants.CollectionPath,
+      SubItems = new List<BubbleItem> { inner }
+    };
+
+    service.Initialize(new List<BubbleItem> { collection });
+    service.ExpandCollection(collection);
+
+    var moved = service.MoveCurrentBubbleToParent(inner);
+
+    Assert.True(moved);
+    Assert.Empty(collection.SubItems);
+    Assert.Equal(2, service.AllBubbles.Count);
+    Assert.Contains(service.AllBubbles, x => x.Name == "inner");
+  }
+
+  [Fact]
+  public void ReorderInCurrentView_MovesItemToTargetIndex() {
+    var service = new BubbleStateService();
+    var a = new BubbleItem { Name = "1", Path = "C:\\tmp\\1.txt" };
+    var b = new BubbleItem { Name = "2", Path = "C:\\tmp\\2.txt" };
+    var c = new BubbleItem { Name = "3", Path = "C:\\tmp\\3.txt" };
+    service.Initialize(new List<BubbleItem> { a, b, c });
+
+    var changed = service.ReorderInCurrentView(a, 2);
+
+    Assert.True(changed);
+    Assert.Equal("2", service.CurrentViewBubbles[0].Name);
+    Assert.Equal("1", service.CurrentViewBubbles[1].Name);
+    Assert.Equal("3", service.CurrentViewBubbles[2].Name);
+  }
 }

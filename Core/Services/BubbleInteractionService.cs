@@ -60,7 +60,10 @@ public class BubbleInteractionService {
   /// <summary>
   /// 建立合併後的集合泡泡資料。
   /// </summary>
-  public BubbleItem CreateMergedCollection(BubbleItem targetData, BubbleItem sourceData) {
+  public BubbleItem CreateMergedCollection(
+    BubbleItem targetData,
+    BubbleItem sourceData,
+    CollectionMergeMode mergeMode = CollectionMergeMode.FlattenItems) {
     string mergedName = ResolveMergedName(targetData, sourceData);
     var collectionData = new BubbleItem {
       Name = mergedName,
@@ -68,19 +71,19 @@ public class BubbleInteractionService {
       SubItems = new List<BubbleItem>()
     };
 
-    if (targetData.SubItems.Count > 0) {
-      collectionData.SubItems.AddRange(targetData.SubItems);
-    } else {
-      collectionData.SubItems.Add(targetData);
-    }
-
-    if (sourceData.SubItems.Count > 0) {
-      collectionData.SubItems.AddRange(sourceData.SubItems);
-    } else {
-      collectionData.SubItems.Add(sourceData);
-    }
+    AppendMergedItem(collectionData.SubItems, targetData, mergeMode);
+    AppendMergedItem(collectionData.SubItems, sourceData, mergeMode);
 
     return collectionData;
+  }
+
+  private static void AppendMergedItem(List<BubbleItem> dest, BubbleItem item, CollectionMergeMode mergeMode) {
+    if (mergeMode == CollectionMergeMode.FlattenItems && item.SubItems.Count > 0) {
+      dest.AddRange(item.SubItems);
+      return;
+    }
+
+    dest.Add(item);
   }
 
   private static bool IsCollectionBubble(BubbleItem item) {

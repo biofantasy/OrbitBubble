@@ -3,34 +3,37 @@ using OrbitBubble.Core.Models;
 namespace OrbitBubble.Core.Services;
 
 public class BubbleStateService {
-  private readonly Stack<List<BubbleItem>> _navHistory = new();
+  private readonly Stack<BubbleItem> _collectionStack = new();
 
   public List<BubbleItem> AllBubbles { get; private set; } = new();
   public List<BubbleItem> CurrentViewBubbles { get; private set; } = new();
-  public bool IsAtRoot => _navHistory.Count == 0;
+  public bool IsAtRoot => _collectionStack.Count == 0;
 
   public void Initialize(List<BubbleItem> allBubbles) {
     AllBubbles = allBubbles ?? new List<BubbleItem>();
-    CurrentViewBubbles = new List<BubbleItem>(AllBubbles);
-    _navHistory.Clear();
+    CurrentViewBubbles = AllBubbles;
+    _collectionStack.Clear();
   }
 
   public void ResetToRoot() {
-    _navHistory.Clear();
-    CurrentViewBubbles = new List<BubbleItem>(AllBubbles);
+    _collectionStack.Clear();
+    CurrentViewBubbles = AllBubbles;
   }
 
   public void ExpandCollection(BubbleItem collection) {
-    _navHistory.Push(new List<BubbleItem>(CurrentViewBubbles));
+    _collectionStack.Push(collection);
     CurrentViewBubbles = collection.SubItems;
   }
 
   public bool TryBackToParent() {
-    if (_navHistory.Count == 0) {
+    if (_collectionStack.Count == 0) {
       return false;
     }
 
-    CurrentViewBubbles = _navHistory.Pop();
+    _collectionStack.Pop();
+    CurrentViewBubbles = _collectionStack.Count > 0
+      ? _collectionStack.Peek().SubItems
+      : AllBubbles;
     return true;
   }
 
@@ -45,6 +48,35 @@ public class BubbleStateService {
       AllBubbles.Remove(sourceData);
       AllBubbles.Add(mergedData);
     }
+  }
+
+  public bool MoveCurrentBubbleToParent(BubbleItem item) {
+    if (IsAtRoot) return false;
+    if (!CurrentViewBubbles.Remove(item)) return false;
+
+    if (_collectionStack.Count == 1) {
+      AllBubbles.Add(item);
+      return true;
+    }
+
+    var parentCollection = _collectionStack.ToArray()[1];
+    parentCollection.SubItems.Add(item);
+    return true;
+  }
+
+  public bool ReorderInCurrentView(BubbleItem item, int targetIndex) {
+    int oldIndex = CurrentViewBubbles.IndexOf(item);
+    if (oldIndex < 0) return false;
+
+    int clampedTarget = Math.Clamp(targetIndex, 0, CurrentViewBubbles.Count - 1);
+    if (oldIndex == clampedTarget) return false;
+
+    CurrentViewBubbles.RemoveAt(oldIndex);
+    if (clampedTarget > oldIndex) {
+      clampedTarget--;
+    }
+    CurrentViewBubbles.Insert(clampedTarget, item);
+    return true;
   }
 
   public bool RemoveBubble(BubbleItem item) {
@@ -68,8 +100,8 @@ public class BubbleStateService {
       added.Add(newItem);
     }
 
-    // 在根層檢視時，新增項目應立即納入目前畫面資料源
-    if (IsAtRoot && added.Count > 0) {
+    // 在根層且目前檢視不是同一個清單引用時，才補到目前畫面清單
+    if (IsAtRoot && added.Count > 0 && !ReferenceEquals(CurrentViewBubbles, AllBubbles)) {
       CurrentViewBubbles.AddRange(added);
     }
 

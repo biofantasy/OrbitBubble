@@ -4,6 +4,7 @@ using OrbitBubble.Core.Models;
 using OrbitBubble.Core.Repositories;
 using OrbitBubble.Core.Services;
 using OrbitBubble.Controls;
+using OrbitBubble.Views;
 using Microsoft.VisualBasic;
 using System.Windows;
 using System.Windows.Controls;
@@ -13,6 +14,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 
 namespace OrbitBubble;
 
@@ -38,6 +40,10 @@ public partial class MainWindow : Window {
   private System.Windows.Point _clickPosition;
   private readonly IGlobalMouseHook _globalHook;
   private UiQualityMode _qualityMode = UiQualityMode.Balanced;
+  private readonly object _mouseMoveSync = new();
+  private System.Windows.Point _queuedMousePoint;
+  private bool _hasQueuedMousePoint;
+  private bool _mouseMoveDispatchScheduled;
 
   public MainWindow()
     : this(CreateDefaultDependencies()) {
@@ -132,13 +138,7 @@ public partial class MainWindow : Window {
     RefreshLayout();
 
     _globalHook.MouseMoved += (x, y) => {
-      // 使用非同步排程，避免全域滑鼠事件阻塞 UI 執行緒
-      this.Dispatcher.BeginInvoke(() => {
-        if (!_gestureEnabled) return;
-        // 不管視窗是 Visible 還是 Collapsed，都由 GlobalHook 驅動偵測
-        // 這樣就不會因為滑鼠「離清單太遠」而收不到事件
-        DetectCircleGesture(new System.Windows.Point(x, y));
-      });
+      QueueMouseMoveForGesture(x, y);
     };
 
     if (_gestureEnabled) {
@@ -238,6 +238,14 @@ public partial class MainWindow : Window {
 
     // 2. 放入拖曳事件初始化
     InitializeDragEvents();
+    _windowRuntimeService.EnsureTopMost(this);
+  }
+
+  protected override void OnActivated(EventArgs e) {
+    base.OnActivated(e);
+    if (this.Visibility == Visibility.Visible) {
+      _windowRuntimeService.EnsureTopMost(this);
+    }
   }
 
   /// <summary>
@@ -305,11 +313,18 @@ public partial class MainWindow : Window {
         // 中心圓拖完，立即重新計算所有泡泡的位置
         RefreshLayout();
       } else {
+        if (!_bubbleStateService.IsAtRoot && TryMoveBubbleToParent(_draggedElement)) {
+          SetBubblesOpacity(1);
+          _draggedElement = null;
+          return;
+        }
+
         // 泡泡拖完，檢查合併或回彈
         bool isMerged = CheckForMerger(_draggedElement);
         if (!isMerged) {
-          ReturnBubbleToOrbit(_draggedElement);
-          //RefreshLayout();
+          if (!TryReorderBubble(_draggedElement)) {
+            ReturnBubbleToOrbit(_draggedElement);
+          }
         }
       }
 
@@ -433,8 +448,6 @@ public partial class MainWindow : Window {
       ApplyCenterHubAccent(Colors.Cyan);
       HubText.Text = BubbleConstants.RootHubText;
 
-      RefreshLayout();
-
       // 3. 執行「噴射彈出」動畫
       ShowMenuWithAnimation();
 
@@ -515,6 +528,40 @@ public partial class MainWindow : Window {
 
     // 確保視窗獲取焦點
     this.Activate();
+    _windowRuntimeService.EnsureTopMost(this);
+  }
+
+  private void QueueMouseMoveForGesture(double x, double y) {
+    lock (_mouseMoveSync) {
+      _queuedMousePoint = new System.Windows.Point(x, y);
+      _hasQueuedMousePoint = true;
+      if (_mouseMoveDispatchScheduled) return;
+      _mouseMoveDispatchScheduled = true;
+    }
+
+    // 合併高頻滑鼠事件，避免 Dispatcher 被大量 BeginInvoke 壓爆
+    Dispatcher.BeginInvoke(DispatcherPriority.Background, ProcessQueuedMouseMoves);
+  }
+
+  private void ProcessQueuedMouseMoves() {
+    while (true) {
+      System.Windows.Point point;
+      lock (_mouseMoveSync) {
+        if (!_hasQueuedMousePoint) {
+          _mouseMoveDispatchScheduled = false;
+          return;
+        }
+
+        point = _queuedMousePoint;
+        _hasQueuedMousePoint = false;
+      }
+
+      if (_gestureEnabled) {
+        // 不管視窗是 Visible 還是 Collapsed，都由 GlobalHook 驅動偵測
+        // 這樣就不會因為滑鼠「離清單太遠」而收不到事件
+        DetectCircleGesture(point);
+      }
+    }
   }
 
 
@@ -524,21 +571,74 @@ public partial class MainWindow : Window {
     var target = _bubbleInteractionService.FindMergeTarget(allItems, draggedBubble, CenterHub, 50);
     if (target == null) return false;
 
-    MergeBubbles(target, draggedBubble);
+    return MergeBubbles(target, draggedBubble);
+  }
+
+  private bool TryMoveBubbleToParent(FrameworkElement element) {
+    if (element.Tag is not BubbleItem data) return false;
+
+    // 拖曳泡泡碰到中心圈時，將該泡泡提升到上一層
+    if (_bubbleInteractionService.GetDistance(element, CenterHub) > 74) {
+      return false;
+    }
+
+    if (!_bubbleStateService.MoveCurrentBubbleToParent(data)) {
+      return false;
+    }
+
+    RefreshLayout();
+    _bubbleRepository.SaveAll(_bubbleStateService.AllBubbles);
     return true;
   }
 
-  private void MergeBubbles(UIElement target, UIElement source) {
+  private bool TryReorderBubble(FrameworkElement element) {
+    if (element.Tag is not BubbleItem data) return false;
+
+    int total = _bubbleStateService.CurrentViewBubbles.Count;
+    if (total <= 1) return false;
+
+    double left = Canvas.GetLeft(element);
+    double top = Canvas.GetTop(element);
+    double width = element.ActualWidth > 0 ? element.ActualWidth : element.Width;
+    double height = element.ActualHeight > 0 ? element.ActualHeight : element.Height;
+    var bubbleCenter = new Point(left + (width / 2), top + (height / 2));
+    var orbitCenter = GetOrbitCenter();
+
+    // 靠近中心代表上一層手勢，避免跟重排判定打架
+    var dxToCenter = bubbleCenter.X - orbitCenter.X;
+    var dyToCenter = bubbleCenter.Y - orbitCenter.Y;
+    if (Math.Sqrt((dxToCenter * dxToCenter) + (dyToCenter * dyToCenter)) < 90) {
+      return false;
+    }
+
+    double angle = Math.Atan2(dyToCenter, dxToCenter);
+    if (angle < 0) angle += Math.PI * 2;
+    double step = (Math.PI * 2) / total;
+    int targetIndex = (int)Math.Round(angle / step, MidpointRounding.AwayFromZero) % total;
+
+    if (!_bubbleStateService.ReorderInCurrentView(data, targetIndex)) {
+      return false;
+    }
+
+    RefreshLayout();
+    _bubbleRepository.SaveAll(_bubbleStateService.AllBubbles);
+    return true;
+  }
+
+  private bool MergeBubbles(UIElement target, UIElement source) {
     var targetFE = target as FrameworkElement;
     var sourceFE = source as FrameworkElement;
-    if (targetFE == null || sourceFE == null) return;
+    if (targetFE == null || sourceFE == null) return false;
 
     var targetData = targetFE.Tag as BubbleItem;
     var sourceData = sourceFE.Tag as BubbleItem;
-    if (targetData == null || sourceData == null) return;
+    if (targetData == null || sourceData == null) return false;
+
+    var mergeMode = ResolveCollectionMergeMode(targetData, sourceData);
+    if (mergeMode == null) return false;
 
     // 1. 建立新的集合物件
-    var collectionData = _bubbleInteractionService.CreateMergedCollection(targetData, sourceData);
+    var collectionData = _bubbleInteractionService.CreateMergedCollection(targetData, sourceData, mergeMode.Value);
 
     // 3. 重要：從「當前顯示清單」中移除這兩個，並換成新的集合
     // 這樣其他的泡泡就會被保留在 _currentViewBubbles 中
@@ -550,6 +650,44 @@ public partial class MainWindow : Window {
     PlayMergeEffect(CenterHub);
 
     _bubbleRepository.SaveAll(_bubbleStateService.AllBubbles);
+    return true;
+  }
+
+  private CollectionMergeMode? ResolveCollectionMergeMode(BubbleItem targetData, BubbleItem sourceData) {
+    // 只在「拖曳中的泡泡是集合」時才詢問模式；
+    // 一般泡泡拖進集合時直接用預設合併，不彈窗。
+    if (!IsCollectionBubble(sourceData)) {
+      return CollectionMergeMode.FlattenItems;
+    }
+
+    var dialog = new CollectionMergeModeDialog {
+      Owner = this
+    };
+
+    var dialogPos = GetCursorDipPosition();
+    dialog.Left = dialogPos.X + 12;
+    dialog.Top = dialogPos.Y + 12;
+
+    var ok = dialog.ShowDialog();
+    if (ok == true) {
+      return dialog.SelectedMode;
+    }
+    return null;
+  }
+
+  private static bool IsCollectionBubble(BubbleItem item) {
+    return item.SubItems.Count > 0 || item.Path == BubbleConstants.CollectionPath;
+  }
+
+  private Point GetCursorDipPosition() {
+    if (Windows.Win32.PInvoke.GetCursorPos(out var p)) {
+      var source = PresentationSource.FromVisual(this);
+      if (source?.CompositionTarget != null) {
+        var m = source.CompositionTarget.TransformFromDevice;
+        return m.Transform(new Point(p.X, p.Y));
+      }
+    }
+    return new Point(SystemParameters.WorkArea.Left + 80, SystemParameters.WorkArea.Top + 80);
   }
 
   private void RefreshLayout() {

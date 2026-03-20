@@ -37,4 +37,23 @@ public class BubbleInteractionServiceTests {
     Assert.Equal(BubbleConstants.CollectionPath, merged.Path);
     Assert.Equal(2, merged.SubItems.Count);
   }
+
+  [Fact]
+  public void CreateMergedCollection_KeepCollectionAsItem_PreservesNestedCollectionNode() {
+    var service = new BubbleInteractionService();
+    var collection = new BubbleItem {
+      Name = "Merge-A",
+      Path = BubbleConstants.CollectionPath,
+      SubItems = new List<BubbleItem> {
+        new BubbleItem { Name = "a", Path = "C:\\tmp\\a.txt" }
+      }
+    };
+    var file = new BubbleItem { Name = "b", Path = "C:\\tmp\\b.txt" };
+
+    var merged = service.CreateMergedCollection(collection, file, CollectionMergeMode.KeepCollectionAsItem);
+
+    Assert.Equal(2, merged.SubItems.Count);
+    Assert.Contains(collection, merged.SubItems);
+    Assert.Contains(file, merged.SubItems);
+  }
 }
