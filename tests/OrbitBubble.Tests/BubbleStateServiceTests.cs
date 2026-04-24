@@ -5,6 +5,36 @@ namespace OrbitBubble.Tests;
 
 public class BubbleStateServiceTests {
   [Fact]
+  public void CurrentNavigatedCollection_AfterBackFromNested_ReflectsRemainingStack() {
+    var inner = new BubbleItem {
+      Name = "inner",
+      Path = BubbleConstants.CollectionPath,
+      SubItems = new List<BubbleItem>()
+    };
+    var outer = new BubbleItem {
+      Name = "outer",
+      Path = BubbleConstants.CollectionPath,
+      SubItems = new List<BubbleItem> { inner }
+    };
+    var service = new BubbleStateService();
+    service.Initialize(new List<BubbleItem> { outer });
+
+    service.ExpandCollection(outer);
+    Assert.Equal("outer", service.CurrentNavigatedCollection?.Name);
+
+    service.ExpandCollection(inner);
+    Assert.Equal("inner", service.CurrentNavigatedCollection?.Name);
+
+    Assert.True(service.TryBackToParent());
+    Assert.False(service.IsAtRoot);
+    Assert.Equal("outer", service.CurrentNavigatedCollection?.Name);
+
+    Assert.True(service.TryBackToParent());
+    Assert.True(service.IsAtRoot);
+    Assert.Null(service.CurrentNavigatedCollection);
+  }
+
+  [Fact]
   public void ExpandAndBackToParent_RestoresPreviousView() {
     var service = new BubbleStateService();
     var child = new BubbleItem { Name = "child", Path = "C:\\tmp\\child.txt" };
@@ -38,6 +68,26 @@ public class BubbleStateServiceTests {
   }
 
   [Fact]
+  public void AddFiles_WhenInsideCollection_AddsToCurrentViewNotRoot() {
+    var service = new BubbleStateService();
+    var collection = new BubbleItem {
+      Name = "folder",
+      Path = BubbleConstants.CollectionPath,
+      SubItems = new List<BubbleItem>()
+    };
+    service.Initialize(new List<BubbleItem> { collection });
+    service.ExpandCollection(collection);
+
+    var added = service.AddFiles(new[] { "C:\\tmp\\nested.txt" });
+
+    Assert.Single(added);
+    Assert.Single(service.AllBubbles);
+    Assert.Equal(collection, service.AllBubbles[0]);
+    Assert.Single(collection.SubItems);
+    Assert.Equal("nested.txt", collection.SubItems[0].Name);
+  }
+
+  [Fact]
   public void MoveCurrentBubbleToParent_WhenInCollection_MovesItemToUpperLevel() {
     var service = new BubbleStateService();
     var inner = new BubbleItem { Name = "inner", Path = "C:\\tmp\\inner.txt" };
@@ -56,6 +106,26 @@ public class BubbleStateServiceTests {
     Assert.Empty(collection.SubItems);
     Assert.Equal(2, service.AllBubbles.Count);
     Assert.Contains(service.AllBubbles, x => x.Name == "inner");
+  }
+
+  [Fact]
+  public void ApplyMerge_AtRoot_AddsMergedItemOnlyOnce() {
+    var a = new BubbleItem { Name = "a", Path = "C:\\tmp\\a.txt" };
+    var b = new BubbleItem { Name = "b", Path = "C:\\tmp\\b.txt" };
+    var service = new BubbleStateService();
+    service.Initialize(new List<BubbleItem> { a, b });
+
+    var merged = new BubbleItem {
+      Name = "Merge",
+      Path = BubbleConstants.CollectionPath,
+      SubItems = new List<BubbleItem> { a, b }
+    };
+    service.ApplyMerge(a, b, merged);
+
+    Assert.Single(service.AllBubbles);
+    Assert.Same(merged, service.AllBubbles[0]);
+    Assert.Single(service.CurrentViewBubbles);
+    Assert.Same(merged, service.CurrentViewBubbles[0]);
   }
 
   [Fact]

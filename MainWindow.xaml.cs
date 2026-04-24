@@ -1,4 +1,4 @@
-﻿using OrbitBubble.Core.Helpers;
+using OrbitBubble.Core.Helpers;
 using OrbitBubble.Core.Managers;
 using OrbitBubble.Core.Models;
 using OrbitBubble.Core.Repositories;
@@ -841,14 +841,21 @@ public partial class MainWindow : Window {
   }
 
   private void BackToParent() {
-    if (_bubbleStateService.TryBackToParent()) {
-
-      // 2. 恢復 CenterHub 視覺：變回青藍色
-      ApplyCenterHubAccent(Colors.Cyan);
-      HubText.Text = BubbleConstants.RootHubText; // 回到主層級清空文字
-
-      RefreshLayout();
+    if (!_bubbleStateService.TryBackToParent()) {
+      return;
     }
+
+    if (_bubbleStateService.IsAtRoot) {
+      ApplyCenterHubAccent(Colors.Cyan);
+      HubText.Text = BubbleConstants.RootHubText;
+    } else {
+      var parent = _bubbleStateService.CurrentNavigatedCollection;
+      if (parent != null) {
+        UpdateCenterHubText(parent.Name);
+      }
+    }
+
+    RefreshLayout();
   }
 
   private void DetectCircleGesture(System.Windows.Point currentPos) {

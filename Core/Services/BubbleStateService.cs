@@ -9,6 +9,12 @@ public class BubbleStateService {
   public List<BubbleItem> CurrentViewBubbles { get; private set; } = new();
   public bool IsAtRoot => _collectionStack.Count == 0;
 
+  /// <summary>
+  /// 非根層時為導航堆疊頂端（目前畫面所屬集合）；根層為 null。供 CenterHub 顯示名稱用。
+  /// </summary>
+  public BubbleItem? CurrentNavigatedCollection =>
+    _collectionStack.Count > 0 ? _collectionStack.Peek() : null;
+
   public void Initialize(List<BubbleItem> allBubbles) {
     AllBubbles = allBubbles ?? new List<BubbleItem>();
     CurrentViewBubbles = AllBubbles;
@@ -41,13 +47,6 @@ public class BubbleStateService {
     CurrentViewBubbles.Remove(targetData);
     CurrentViewBubbles.Remove(sourceData);
     CurrentViewBubbles.Add(mergedData);
-
-    // 根層合併時同步更新完整資料來源
-    if (IsAtRoot) {
-      AllBubbles.Remove(targetData);
-      AllBubbles.Remove(sourceData);
-      AllBubbles.Add(mergedData);
-    }
   }
 
   public bool MoveCurrentBubbleToParent(BubbleItem item) {
@@ -85,10 +84,13 @@ public class BubbleStateService {
     return removedFromAll || removedFromCurrent;
   }
 
+  /// <summary>
+  /// 拖放檔案／資料夾時：根層加入 AllBubbles；在集合內則加入目前層級的 SubItems，避免誤加到根層。
+  /// </summary>
   public List<BubbleItem> AddFiles(IEnumerable<string> filePaths) {
     var added = new List<BubbleItem>();
     foreach (var path in filePaths) {
-      if (AllBubbles.Any(b => b.Path == path)) {
+      if (ContainsPathInTree(AllBubbles, path)) {
         continue;
       }
 
@@ -96,15 +98,33 @@ public class BubbleStateService {
         Name = System.IO.Path.GetFileName(path),
         Path = path
       };
-      AllBubbles.Add(newItem);
+
+      if (IsAtRoot) {
+        AllBubbles.Add(newItem);
+      } else {
+        CurrentViewBubbles.Add(newItem);
+      }
+
       added.Add(newItem);
     }
 
-    // 在根層且目前檢視不是同一個清單引用時，才補到目前畫面清單
-    if (IsAtRoot && added.Count > 0 && !ReferenceEquals(CurrentViewBubbles, AllBubbles)) {
-      CurrentViewBubbles.AddRange(added);
+    return added;
+  }
+
+  /// <summary>
+  /// 遞迴檢查路徑是否已存在於樹中（含巢狀集合），供拖放去重用。
+  /// </summary>
+  private static bool ContainsPathInTree(IEnumerable<BubbleItem> items, string path) {
+    foreach (var b in items) {
+      if (b.Path == path) {
+        return true;
+      }
+
+      if (ContainsPathInTree(b.SubItems, path)) {
+        return true;
+      }
     }
 
-    return added;
+    return false;
   }
 }
