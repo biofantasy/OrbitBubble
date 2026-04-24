@@ -15,9 +15,9 @@
 	<Grid>
 		<Canvas x:Name="MainCanvas" Background="Transparent">
 
-			<Canvas x:Name="AnimationWrapper" 
-                    Width="800" Height="800" 
-                    Background="Transparent" 
+			<Canvas x:Name="AnimationWrapper"
+                    Width="800" Height="800"
+                    Background="Transparent"
                     RenderTransformOrigin="0.5,0.5">
 
 				<Canvas.RenderTransform>

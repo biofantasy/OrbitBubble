@@ -44,6 +44,7 @@ public partial class MainWindow : Window {
   private System.Windows.Point _queuedMousePoint;
   private bool _hasQueuedMousePoint;
   private bool _mouseMoveDispatchScheduled;
+  private long _lastGestureProcessedMs; // 節流用，限制手勢處理最高 ~60Hz
 
   public MainWindow()
     : this(CreateDefaultDependencies()) {
@@ -126,7 +127,9 @@ public partial class MainWindow : Window {
     // 3. 確保背景是透明但「存在」的，這樣才抓得到全域事件
     MainCanvas.Background = System.Windows.Media.Brushes.Transparent;
 
-    _bubbleStateService.Initialize(_bubbleRepository.LoadAll()); // 程式啟動先載入
+    _bubbleStateService.Initialize(_bubbleRepository.LoadAll());
+    // 背景預熱 icon 快取，讓第一次顯示選單時不需要等 Win32 I/O
+    _ = _bubbleViewFactory.IconCache.PrewarmAsync(_bubbleStateService.AllBubbles);
     ApplyQualityMode(_qualityMode);
     // 監聽中心圓的右鍵
     CenterHub.MouseRightButtonUp += CenterHub_MouseRightButtonUp;
@@ -506,32 +509,30 @@ public partial class MainWindow : Window {
   }
 
   private async void ShowMenuWithAnimation() {
-    // 1. 初始化顯示狀態
+    // 1. 視窗設為 Visible（canvas opacity=0, scale=0）
     _menuAnimationService.PrepareShowState(this, MainCanvas, MainScale, MainRotate);
-
-    // 2. 核心定位：讓舞台中心對準滑鼠
-    // 這裡調用 UpdatePositionToMouse，它會執行 Canvas.SetLeft(AnimationWrapper, mouseX - 400)
     UpdatePositionToMouse();
-
-    // 3. 確保佈局已計算（重要：否則 GetPosition 可能會拿到舊資料）
-    this.UpdateLayout();
-    await this.NextFrame(); // 等待下一影格確保渲染引擎抓到新位置
-
-    // 4. 重置手勢快照，避免舊的滑鼠軌跡干擾
     ResetGesture();
 
-    // 5. 同步執行重新佈局 (生成泡泡)
-    RefreshLayout();
+    // 2. 建泡泡並等所有 icon 載完
+    //    icon 全設完後 BitmapCache 才 snapshot，確保快取內容是完整的
+    await RefreshLayoutAndWaitIconsAsync();
 
-    // 6. 啟動動畫
+    // 3. 等一幀讓 WPF 完成 Effect 預熱 + BitmapCache 建立
+    await this.NextFrame();
+
+    // 4. 動畫開始，BitmapCache 已有完整內容
     _menuAnimationService.PlayShow(MainCanvas, MainScale, MainRotate);
 
-    // 確保視窗獲取焦點
     this.Activate();
     _windowRuntimeService.EnsureTopMost(this);
   }
 
   private void QueueMouseMoveForGesture(double x, double y) {
+    // 節流：手勢判斷只需要 ~60Hz，丟掉多餘的 event 減少 CPU 負擔
+    var now = Environment.TickCount64;
+    if (now - _lastGestureProcessedMs < 16) return;
+
     lock (_mouseMoveSync) {
       _queuedMousePoint = new System.Windows.Point(x, y);
       _hasQueuedMousePoint = true;
@@ -539,7 +540,7 @@ public partial class MainWindow : Window {
       _mouseMoveDispatchScheduled = true;
     }
 
-    // 合併高頻滑鼠事件，避免 Dispatcher 被大量 BeginInvoke 壓爆
+    _lastGestureProcessedMs = now;
     Dispatcher.BeginInvoke(DispatcherPriority.Background, ProcessQueuedMouseMoves);
   }
 
@@ -691,13 +692,22 @@ public partial class MainWindow : Window {
   }
 
   private void RefreshLayout() {
-
-    ClearBubbles(); // 清空畫面
-
-    // 這裡改用非同步載入，避免一次擠爆 UI 執行緒
-    for (int i = 0; i < _bubbleStateService.CurrentViewBubbles.Count; i++) {
-      AddBubble(_bubbleStateService.CurrentViewBubbles[i], i, _bubbleStateService.CurrentViewBubbles.Count);
+    ClearBubbles();
+    var items = _bubbleStateService.CurrentViewBubbles;
+    for (int i = 0; i < items.Count; i++) {
+      _ = AddBubbleAsync(items[i], i, items.Count);
     }
+  }
+
+  // 供 ShowMenuWithAnimation 使用：等所有 icon 都設完再讓 BitmapCache snapshot
+  private Task RefreshLayoutAndWaitIconsAsync() {
+    ClearBubbles();
+    var items = _bubbleStateService.CurrentViewBubbles;
+    var tasks = new List<Task>(items.Count);
+    for (int i = 0; i < items.Count; i++) {
+      tasks.Add(AddBubbleAsync(items[i], i, items.Count));
+    }
+    return Task.WhenAll(tasks);
   }
 
   // 假設這是您動態生成泡泡時掛載的事件
@@ -757,20 +767,14 @@ public partial class MainWindow : Window {
     PlayMergeEffect(target);
   }
 
-  private void AddBubble(BubbleItem data, int index, int totalCount) {
+  private async Task AddBubbleAsync(BubbleItem data, int index, int totalCount) {
     var bubble = _bubbleViewFactory.CreateBubble(data, Bubble_MouseLeftButtonDown, OnBubbleDeleteRequested, OnBubbleRenameRequested);
     AnimationWrapper.Children.Add(bubble);
 
-    // 由佈局服務統一計算座標，讓 MainWindow 只負責呈現
     var position = _bubbleLayoutService.CalculateBubblePosition(index, totalCount, bubble.Width, bubble.Height, GetOrbitCenter());
-    double x = position.X;
-    double y = position.Y;
+    Canvas.SetLeft(bubble, position.X);
+    Canvas.SetTop(bubble, position.Y);
 
-    Canvas.SetLeft(bubble, x);
-    Canvas.SetTop(bubble, y);
-
-    // 噴射動畫：從中心(1,1)噴射到正確位置的 Scale(1,1)
-    // 注意：這裡我們讓 RenderTransformOrigin 為 0.5,0.5，所以動畫看起來是原地變大
     DoubleAnimation expand = new DoubleAnimation {
       To = 1.0,
       Duration = TimeSpan.FromSeconds(0.3),
@@ -779,6 +783,9 @@ public partial class MainWindow : Window {
     };
     bubble.RenderTransform.BeginAnimation(ScaleTransform.ScaleXProperty, expand);
     bubble.RenderTransform.BeginAnimation(ScaleTransform.ScaleYProperty, expand);
+
+    var icon = await _bubbleViewFactory.IconCache.GetIconAsync(data);
+    bubble.IconSource = icon;
   }
 
   private void OnBubbleDeleteRequested(BubbleItem data) {

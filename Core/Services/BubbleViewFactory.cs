@@ -12,6 +12,7 @@ public class BubbleViewFactory {
   private readonly MenuFactory _menuFactory;
   private readonly BubbleValidationService _bubbleValidationService;
   public UiQualityMode QualityMode { get; set; } = UiQualityMode.Balanced;
+  public IconCacheService IconCache => _iconCacheService;
 
   public BubbleViewFactory(IconCacheService iconCacheService, MenuFactory menuFactory, BubbleValidationService bubbleValidationService) {
     _iconCacheService = iconCacheService ?? throw new ArgumentNullException(nameof(iconCacheService));
@@ -19,7 +20,7 @@ public class BubbleViewFactory {
     _bubbleValidationService = bubbleValidationService ?? throw new ArgumentNullException(nameof(bubbleValidationService));
   }
 
-  public FrameworkElement CreateBubble(
+  public BubbleControl CreateBubble(
     BubbleItem data,
     MouseButtonEventHandler onLeftButtonDown,
     Action<BubbleItem> onDeleteRequested,
@@ -32,7 +33,7 @@ public class BubbleViewFactory {
       BubbleSize = 88,
       RenderTransformOrigin = new Point(0.5, 0.5),
       RenderTransform = new ScaleTransform(0, 0),
-      IconSource = _iconCacheService.GetIcon(data),
+      IconSource = null, // icon 由呼叫端非同步載入，避免在 UI thread 阻塞
       Label = data.Name,
       AccentColor = isCollection ? Colors.Gold : Colors.Cyan,
       QualityMode = QualityMode,

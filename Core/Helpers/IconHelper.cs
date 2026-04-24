@@ -26,24 +26,23 @@ public static class IconHelper {
   }
 
   private const uint SHGFI_ICON = 0x100;
-  private const uint SHGFI_LARGEICON = 0x0; // 32x32
-  private const uint SHGFI_USEFILEATTRIBUTES = 0x10;
+  private const uint SHGFI_LARGEICON = 0x0;
 
   public static ImageSource? GetIcon(string path) {
     SHFILEINFO shfi = new SHFILEINFO();
-    // 獲取大圖示
     SHGetFileInfo(path, 0, ref shfi, (uint)Marshal.SizeOf(shfi), SHGFI_ICON | SHGFI_LARGEICON);
 
     if (shfi.hIcon == nint.Zero) return null;
 
-    // 將 hIcon 轉換為 WPF 的 ImageSource
     ImageSource icon = Imaging.CreateBitmapSourceFromHIcon(
         shfi.hIcon,
         Int32Rect.Empty,
         BitmapSizeOptions.FromEmptyOptions());
 
-    // 記得釋放 Win32 資源，避免記憶體洩漏
     DestroyIcon(shfi.hIcon);
+
+    // Freeze 後可跨 thread 安全存取（Task.Run 中呼叫需要此保護）
+    if (icon.CanFreeze) icon.Freeze();
 
     return icon;
   }

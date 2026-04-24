@@ -50,11 +50,9 @@ public class GlobalMouseHook : IGlobalMouseHook {
   private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
     if (nCode >= 0 && wParam == (IntPtr)WM_MOUSEMOVE) {
       MSLLHOOKSTRUCT hookStruct = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
-
-      // 非同步發出事件，不阻塞滑鼠移動
-      int x = hookStruct.pt.x;
-      int y = hookStruct.pt.y;
-      Task.Run(() => MouseMoved?.Invoke(x, y));
+      // WH_MOUSE_LL callback 本來就在安裝 hook 的 thread（UI thread）
+      // 直接 invoke 即可，QueueMouseMoveForGesture 只是 lock + store，夠快不會卡 hook
+      MouseMoved?.Invoke(hookStruct.pt.x, hookStruct.pt.y);
     }
     return CallNextHookEx(_hookId, nCode, wParam, lParam);
   }
